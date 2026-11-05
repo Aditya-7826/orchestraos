@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     # "a2a":   supervisor calls the standalone research service over A2A.
     research_mode: Literal["local", "a2a"] = "local"
 
+    # --- Memory ---
+    memory_enabled: bool = True
+    # Graph memory (Neo4j, `graph` Compose profile). Unset = semantic memory only.
+    neo4j_uri: str | None = None
+    neo4j_user: str = "neo4j"
+    neo4j_password: str | None = None
+
     # --- Python sandbox (analytics agent) ---
     sandbox_image: str = "orchestraos-sandbox:latest"
     sandbox_memory: str = "512m"

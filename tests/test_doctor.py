@@ -55,3 +55,15 @@ def test_low_ram_is_warning_not_failure():
 
 def test_enough_ram_passes():
     assert doctor.check_memory(16 * doctor.GIB).ok
+
+
+def test_neo4j_check_skipped_when_not_configured(settings):
+    assert doctor.check_neo4j(settings) is None
+
+
+def test_unreachable_neo4j_is_a_warning(settings):
+    settings = settings.model_copy(
+        update={"neo4j_uri": "bolt://127.0.0.1:1", "neo4j_password": "x"}
+    )
+    check = doctor.check_neo4j(settings)
+    assert not check.ok and check.warn_only

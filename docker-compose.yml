@@ -17,6 +17,8 @@ services:
       # The sandbox containers are started by the *host's* Docker daemon, which needs the
       # workspace's host path for bind mounts. `make setup` writes HOST_WORKSPACE to .env.
       SANDBOX_HOST_WORKSPACE: ${HOST_WORKSPACE:?run `make setup` (sets HOST_WORKSPACE in .env)}
+      # If .env enables graph memory (NEO4J_URI), reach Neo4j by its service name in Docker.
+      NEO4J_URI: ${NEO4J_URI:+bolt://neo4j:7687}
     extra_hosts:
       - "host.docker.internal:host-gateway"  # needed on Linux; harmless elsewhere
     ports:
@@ -64,6 +66,11 @@ services:
     volumes:
       - neo4j-data:/data
     mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
 
 volumes:
   neo4j-data:

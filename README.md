@@ -6,9 +6,9 @@ action), uses tools over MCP, asks for your approval before side effects, and an
 
 Everything runs locally: LLMs via [Ollama](https://ollama.com), no paid APIs, no cloud services.
 
-> **Status: Phase 6 of 10.** Chat UI -> streaming API -> supervisor -> research, analytics,
+> **Status: Phase 7 of 10.** Chat UI -> streaming API -> supervisor -> research, analytics,
 > writing and action agents work end to end on local models, with human approval before any
-> file is written. Memory, A2A, tracing and evals come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the phase plan.
+> file is written and memory across sessions. A2A, tracing and evals come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the phase plan.
 
 ## How a run works
 
@@ -63,7 +63,7 @@ src/orchestraos/
   llm/router.py  # small vs large model per step, retry once, then fall back
   graph/         # supervisor StateGraph, typed state, planner, checkpointer, answer clean-up
   agents/        # research, analytics, writing (+ action stub); each a LangGraph subgraph
-  memory/        # memory interface
+  memory/        # memory agent: ChromaDB (semantic) + Neo4j (graph), recall/remember subgraphs
   tools/         # tool logic: workspace files, web search/fetch, Docker sandbox, MCP client
   mcp_servers/   # FastMCP servers (stdio): search, filesystem, python_sandbox
   api/           # FastAPI: runs as background tasks, SSE events, workspace files
@@ -133,7 +133,29 @@ queries, write code, write prose) and letting code make the tool calls works muc
 
 After the writer, code (not the model) has the last word on the answer:
 - image links to files no step produced are removed, and charts the writer forgot are appended
+- source URLs no tool returned are removed (with no research step, a 7B model still wrote `[1]`
+  and invented a plausible URL)
 - if any step failed, a notice saying so goes at the top, so made-up figures can't pass as real
+
+### Memory across sessions
+
+The memory agent runs before planning (`recall`) and after answering (`remember`):
+
+- **Semantic memory** (ChromaDB on disk, `nomic-embed-text` via Ollama): past goals + answers,
+  and facts the user stated. Cut-offs are calibrated on real embeddings: related past runs
+  scored 0.13-0.16 cosine distance, unrelated ones 0.49-0.58, so episodes must be within 0.35.
+- **Graph memory** (Neo4j, optional `graph` profile): facts as `user -[prefers]-> bullet points`.
+  Without Neo4j the app uses semantic memory only.
+- **Only the user's words become facts.** The small model extracts facts from the goal, never
+  from answers, so a hallucination can't become a "memory"; and it only runs when the goal has
+  first-person words ("I", "my", "we prefer").
+- Memory is best-effort: if a store is down, the run continues without it.
+
+Measured: stating "I prefer answers as short bullet points" in one session, then asking
+"What is CrewAI?" in a fresh process, recalled `user prefers short bullet points` and the
+answer came back as short bullets.
+
+To use graph memory: `make up-graph`, then set `NEO4J_URI=bolt://localhost:7687` in `.env`.
 
 ### Human approval for side effects
 

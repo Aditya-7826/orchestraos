@@ -4,6 +4,7 @@ Each check is a small pure-ish function returning a `Check`, so they're easy to
 unit test by passing in fakes instead of touching the real Ollama/Docker.
 """
 
+import asyncio
 import subprocess
 import sys
 from collections.abc import Callable
@@ -107,13 +108,41 @@ def check_memory(total_bytes: int) -> Check:
     return Check("RAM", ok=True, detail=f"{total_gib:.1f} GiB")
 
 
+def check_neo4j(settings: Settings) -> Check | None:
+    """Only checked when graph memory is configured; it's optional."""
+    if not settings.neo4j_uri:
+        return None
+
+    async def connect() -> None:
+        from orchestraos.memory.graph import Neo4jGraph
+
+        graph = await Neo4jGraph.connect(
+            settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password or ""
+        )
+        await graph.close()
+
+    try:
+        asyncio.run(connect())
+    except Exception as exc:
+        return Check(
+            "Neo4j (graph memory)",
+            ok=False,
+            warn_only=True,
+            detail=f"{settings.neo4j_uri}: {type(exc).__name__}",
+            hint="make up-graph, or unset NEO4J_URI to use semantic memory only",
+        )
+    return Check("Neo4j (graph memory)", ok=True, detail=settings.neo4j_uri)
+
+
 def run_checks(settings: Settings) -> list[Check]:
-    return [
+    checks = [
         *check_ollama(settings),
         check_docker(),
         check_sandbox_image(settings.sandbox_image),
+        check_neo4j(settings),
         check_memory(psutil.virtual_memory().total),
     ]
+    return [c for c in checks if c is not None]
 
 
 def format_check(check: Check) -> str:

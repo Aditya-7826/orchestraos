@@ -1,4 +1,9 @@
-from orchestraos.graph.answer import failure_notice, reconcile_images, strip_outer_fence
+from orchestraos.graph.answer import (
+    drop_unbacked_sources,
+    failure_notice,
+    reconcile_images,
+    strip_outer_fence,
+)
 from orchestraos.graph.supervisor import format_results
 
 CHART = "outputs/abc/chart.png"
@@ -66,3 +71,29 @@ def test_drops_stray_opening_fence():
 def test_keeps_balanced_code_blocks():
     answer = "Run:\n```bash\nmake up\n```\nDone."
     assert strip_outer_fence(answer) == answer
+
+
+def test_made_up_source_and_citation_are_removed_when_nothing_was_researched():
+    answer = (
+        "- LangGraph is a library for agents [1].\n\nSources:\n[1] https://www.langgraph.com/about"
+    )
+    assert drop_unbacked_sources(answer, []) == "- LangGraph is a library for agents."
+
+
+def test_real_sources_are_kept_and_fake_ones_dropped():
+    answer = (
+        "LangGraph [1] vs CrewAI [2].\n\nSources:\n"
+        "[1] https://real.example/a\n[2] https://invented.example/b"
+    )
+    cleaned = drop_unbacked_sources(answer, ["https://real.example/a"])
+    assert cleaned == "LangGraph [1] vs CrewAI [2].\n\nSources:\n[1] https://real.example/a"
+
+
+def test_local_file_sources_dont_count_as_web_citations():
+    answer = "Revenue was 106,080 [1].\n\nSources: None"
+    assert drop_unbacked_sources(answer, ["sales.csv"]) == "Revenue was 106,080."
+
+
+def test_markdown_links_to_known_urls_survive():
+    answer = "See [the docs](https://real.example/a)."
+    assert drop_unbacked_sources(answer, ["https://real.example/a"]) == answer

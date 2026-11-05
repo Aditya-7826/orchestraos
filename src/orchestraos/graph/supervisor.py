@@ -20,7 +20,12 @@ from langgraph.graph.state import CompiledStateGraph
 
 from orchestraos.agents.base import Agent, AgentState
 from orchestraos.graph import planner
-from orchestraos.graph.answer import failure_notice, reconcile_images, strip_outer_fence
+from orchestraos.graph.answer import (
+    drop_unbacked_sources,
+    failure_notice,
+    reconcile_images,
+    strip_outer_fence,
+)
 from orchestraos.graph.state import AGENT_NAMES, Approval, StepResult, SupervisorState
 from orchestraos.llm.router import ModelRouter
 from orchestraos.memory.base import Memory
@@ -141,15 +146,17 @@ def build_supervisor(
         writing = [r for r in results if r["agent"] == "writing" and r["ok"]]
         answer = writing[-1]["output"] if writing else format_results(results)
         artifacts = [a for r in results if r["ok"] for a in r["artifacts"]]
+        # Every source any step used, de-duplicated, in first-seen order.
+        sources = list(dict.fromkeys(s for r in results for s in r["sources"]))
+
         answer = reconcile_images(strip_outer_fence(answer), artifacts)
+        answer = drop_unbacked_sources(answer, sources)
         failed = [(r["step_id"], r["agent"], r["output"][:300]) for r in results if not r["ok"]]
         if notice := failure_notice(failed):
             answer = f"{notice}\n\n{answer}"
         # Actions usually run after the writer, so report what they did (saved / declined).
         if done := [r["output"] for r in results if r["agent"] == "action" and r["ok"]]:
             answer += "\n\n---\n" + "\n".join(f"**{line}**" for line in done)
-        # Every source any step used, de-duplicated, in first-seen order.
-        sources = list(dict.fromkeys(s for r in results for s in r["sources"]))
         return {
             "final_answer": answer,
             "sources": sources,

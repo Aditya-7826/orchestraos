@@ -31,9 +31,10 @@ class TaskKind(StrEnum):
     PLAN = "plan"
     WRITE = "write"
     CODE = "code"
+    EXTRACT = "extract"  # pull structured facts out of a short text
 
 
-SMALL_MODEL_TASKS = frozenset({TaskKind.ROUTE, TaskKind.CLASSIFY})
+SMALL_MODEL_TASKS = frozenset({TaskKind.ROUTE, TaskKind.CLASSIFY, TaskKind.EXTRACT})
 
 
 class ChatModel(Protocol):

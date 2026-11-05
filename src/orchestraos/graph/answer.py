@@ -9,6 +9,32 @@ import re
 
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".svg", ".gif")
 _IMAGE = re.compile(r"!\[([^\]]*)\]\(\s*<?([^)>\s]+)>?\s*\)")
+_URL = re.compile(r"https?://[^\s)>\]]+")
+_CITATION = re.compile(r"\s?\[\d+\](?!\()")  # [1] but not a markdown link [1](...)
+_SOURCES_HEADING = re.compile(r"^\s*(?:#+\s*)?\**sources\**:?\**\s*(?:none)?\s*$", re.I)
+
+
+def drop_unbacked_sources(answer: str, sources: list[str]) -> str:
+    """Remove source URLs no step produced, and all citations if nothing was researched.
+
+    With no research step, a small model will still write "[1]" and invent a plausible
+    URL. Only URLs that a tool really returned may appear in the answer.
+    """
+    known = set(sources)
+    kept = []
+    for line in answer.splitlines():
+        urls = _URL.findall(line)
+        if urls and not any(url.rstrip(".,;") in known for url in urls):
+            continue  # a line citing only made-up URLs
+        kept.append(line)
+    text = "\n".join(kept)
+    if not any(s.startswith("http") for s in sources):
+        text = _CITATION.sub("", text)
+    # A "Sources:" heading with nothing left under it.
+    lines = text.rstrip().splitlines()
+    while lines and (_SOURCES_HEADING.match(lines[-1]) or not lines[-1].strip()):
+        lines.pop()
+    return "\n".join(lines).strip()
 
 
 _OUTER_FENCE = re.compile(r"^```\s*\n(.*)\n```\s*$", re.DOTALL)
