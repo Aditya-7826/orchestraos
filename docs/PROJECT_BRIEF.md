@@ -65,4 +65,4 @@ _Not in the original brief; derived from the architecture above._
 | 7 | Memory: ChromaDB + Neo4j (`graph` profile) | ✅ |
 | 8 | Research agent over A2A (`RESEARCH_MODE=a2a`) | ✅ |
 | 9 | Langfuse tracing (`observability` profile) | ✅ |
-| 10 | Evals: 30+ tasks with pass/fail checks | README metrics come from a real run |
+| 10 | Evals: 30+ tasks with pass/fail checks | ✅ 35/36 (97%), see README |

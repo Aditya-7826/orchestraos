@@ -1,6 +1,6 @@
 # Eval results — 2026-11-05T23:36:24
 
-Models: small `qwen2.5:3b`, large `qwen2.5:7b`, embeddings `nomic-embed-text` · machine: Windows 11, 7.3 GB RAM, 12 CPUs · commit `c9dbf41` · wall time 50 min
+Models: small `qwen2.5:3b`, large `qwen2.5:7b`, embeddings `nomic-embed-text` · machine: Windows 11, 7.3 GB RAM, 12 CPUs · commit `9ab4d92` · wall time 50 min
 
 | Category | Passed | Rate | Median time |
 |---|---|---|---|

@@ -1,229 +1,300 @@
 # OrchestraOS
 
-A free, local multi-agent AI operating system. You give a goal in a chat UI; a LangGraph
-supervisor plans it, routes steps to specialist agents (memory, research, writing, analytics,
-action), uses tools over MCP, asks for your approval before side effects, and answers with sources.
+A free, local multi-agent AI system. You give it a goal in a chat UI, such as *"Research
+LangGraph vs CrewAI, analyse sales.csv and write me a report with a chart"*. A LangGraph
+supervisor plans the work and routes each step to a specialist agent (research, analytics,
+writing, action). The agents use tools over MCP. You approve any file write before it
+happens, the system remembers you across sessions, and the answer comes back with its sources.
 
-Everything runs locally: LLMs via [Ollama](https://ollama.com), no paid APIs, no cloud services.
+Everything runs on your machine: models via [Ollama](https://ollama.com) (`qwen2.5:7b`,
+`qwen2.5:3b`, `nomic-embed-text`), with no paid APIs or cloud services and no API keys.
 
-> **Status: Phase 9 of 10.** Chat UI -> streaming API -> supervisor -> research, analytics,
-> writing and action agents work end to end on local models, with human approval before any
-> file is written, memory across sessions, the research agent also served over A2A, and every
-> step traced in self-hosted Langfuse. Evals come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the phase plan.
+**Measured result:** 35 of 36 benchmark tasks passed (97%) on an 8 GB Windows laptop, with
+the full suite taking 51 minutes. See [Results](#results).
 
-## How a run works
+## What it does
+
+- **Plans and delegates.** A supervisor graph triages each goal with a small model, plans it
+  with a large one, and runs one specialist agent per step. State is checkpointed, so a run
+  that stops part-way resumes where it left off.
+- **Researches with sources.** It searches the web (DuckDuckGo, no API key) and reads the
+  pages and any local documents named in the goal, then cites them as numbered sources.
+- **Analyses data safely.** It writes pandas/matplotlib code and runs it in a Docker sandbox
+  with no network, capped resources and the data mounted read-only. Errors go back to the model
+  to fix (up to 2 times).
+- **Asks before acting.** The only agent that can write files pauses the run with LangGraph's
+  `interrupt()` and waits for Approve or Reject in the UI.
+- **Remembers you.** Semantic memory (ChromaDB) and graph memory (Neo4j, optional) keep your
+  stated preferences and past work across sessions.
+- **Speaks open protocols.** Its tools are MCP servers (official `mcp` SDK), and the research
+  agent is also served over A2A (official `a2a-sdk`) with an Agent Card.
+- **Is observable and measured.** Every step can be traced in self-hosted Langfuse, and a
+  36-task benchmark with pass/fail checks produces the numbers below.
+
+## Architecture
 
 ```
-goal -> recall_memory -> triage (small model: "direct" or "plan")
-     -> plan (large model: JSON list of steps, last one is always "writing")
-     -> research / analytics / action / writing nodes, one per step, in plan order
-     -> finalize (answer + de-duplicated sources) -> store_memory
+ Streamlit chat UI ──HTTP/SSE──▶ FastAPI (runs as background tasks, event replay)
+                                   │
+                                   ▼
+                    LangGraph supervisor  (SQLite checkpointer)
+   recall_memory ─▶ triage (3B) ─▶ plan (7B) ─▶ [ one agent per step ] ─▶ finalize ─▶ store_memory
+                                                 │
+        ┌──────────────────┬─────────────────────┼─────────────────────┐
+     research           analytics             writing                action
+   (local or A2A)    (code + sandbox)       (markdown)       (interrupt → approve)
+        │                  │                                          │
+        ▼                  ▼                                          ▼
+   MCP: search,       MCP: python_sandbox ──▶ Docker               MCP: filesystem
+   filesystem         (no network, read-only data)                 (workspace/ only)
+
+   Memory: ChromaDB (+ Neo4j)   ·   Models: Ollama on the host   ·   Tracing: Langfuse
 ```
 
-State is checkpointed to SQLite after every node, so a run that stops part-way resumes
-where it left off: `uv run orchestraos run --thread <id>`.
+## Results
+
+The benchmark has 36 tasks with machine-checked pass/fail criteria
+([evals/tasks.yaml](evals/tasks.yaml)). Every number here comes from running it, and the raw
+per-task results are in [evals/results/](evals/results/).
+
+| Category | What it checks | Passed | Median time |
+|---|---|---|---|
+| triage | the small model picks "direct answer" vs "plan" correctly | 8/8 | <1 s |
+| planning | the plan uses the right agents (e.g. no web research for a CSV question) | 8/8 | 15 s |
+| analytics | exact numbers computed from the fixture CSVs, charts produced | 6/7 | 136 s |
+| grounding | no invented results for a missing file, no made-up sources | 3/3 | 72 s |
+| safety | writes only after approval; rejected and out-of-workspace writes don't happen; overwrites are flagged | 5/5 | 82 s |
+| research | real web research returns real sources; local documents are read and cited | 3/3 | 212 s |
+| memory | a preference stated in one session shapes a later, unrelated one | 2/2 | 178 s |
+| **all** | | **35/36 (97%)** | 60 s |
+
+The models were `qwen2.5:7b` and `qwen2.5:3b` with `nomic-embed-text`, on Windows 11 with
+7.3 GB RAM. The full run took 51 minutes (commit `0ee994e`). On top of its own checks, every
+end-to-end task also checks that the answer has no URL or image that no tool produced.
+
+**How the numbers got here.** The benchmark was also used during development, so two fixes came
+from it:
+- **First smoke run:** the planner sent a markdown notes file to the CSV agent. The fix was a
+  prompt rule saying which agent handles which file types.
+- **First full run, 34/36:** a stated preference wasn't recalled for an unrelated question,
+  because similarity search alone can't connect the two. Facts about the user are now always
+  recalled. That run also turned up a CSV rendered as a broken image.
+
+The second full run, on the fixed code, gave the 35/36 above. Both runs' results are committed.
+
+**The remaining failure** (`a-early-starters`) fails the same way in both runs. Asked for the
+employees who started *before 2021*, the 7B model leaves out both 2020 starters, an off-by-one
+in the filter it writes. It's left visible rather than tuned away.
+
+Reproduce with `uv run python -m evals.run` (about an hour on a laptop). The runner is
+resumable (`--resume`), runs each task in a fresh workspace and memory store, and warns if
+you're on battery or low on RAM.
 
 ## Quick start
 
 Prerequisites (all free): Python 3.12, [uv](https://docs.astral.sh/uv/), Docker, Ollama.
 
 ```bash
-make setup                      # uv sync, create .env and workspace/ (with sample data)
-ollama pull qwen2.5:3b          # small model: routing
-ollama pull qwen2.5:7b          # large model: planning / writing
-ollama pull nomic-embed-text    # embeddings
-make sandbox-image              # build the Python sandbox image (one-off)
+make setup                      # deps, .env (with generated secrets), workspace/ with sample data
+ollama pull qwen2.5:3b          # small model: triage, fact extraction
+ollama pull qwen2.5:7b          # large model: planning, code, writing
+ollama pull nomic-embed-text    # embeddings for memory
+make sandbox-image              # the no-network Python sandbox image (one-off)
 make doctor                     # checks Ollama, models, Docker, sandbox image, RAM
 make up                         # api + ui in Docker
 # open http://localhost:8501 and try: "Analyse sales.csv: revenue per region with a chart"
 ```
 
-No `make`? Every target is a single command; see the [Makefile](Makefile).
+Or without Docker for the app itself: `make dev` (API on :8000) and `make ui` (UI on :8501).
+A terminal run is `uv run orchestraos run "<goal>"`. If you don't have `make`, each target is
+a single command; see the [Makefile](Makefile).
 
-## Running on 8 GB of RAM
+### Running on 8 GB of RAM
 
-Ollama runs **on the host**, not in Docker, so the model's memory isn't counted against the
-Docker VM. Heavier services are behind Compose profiles so you only run what you need:
+Ollama runs on the host, not in Docker, so the model's memory isn't counted against the Docker
+VM. Heavier services sit behind Compose profiles so you only run what you need:
 
-| Command | Services |
+| Command | Adds |
 |---|---|
-| `docker compose up -d` | `api` (FastAPI, MCP servers) + `ui` (Streamlit) |
-| `docker compose --profile graph up -d` | + Neo4j (capped at 1 GB) |
-| `docker compose --profile a2a up -d` | + the research agent as an A2A service on :8100 |
-| `make up-observability` | + Langfuse (6 containers, ~1.6 GB idle) for tracing |
+| `make up` | `api` (FastAPI + MCP servers) and `ui` (Streamlit) |
+| `make up-graph` | Neo4j graph memory (capped at 1 GB) |
+| `docker compose --profile a2a up -d` | the research agent as an A2A service on :8100 |
+| `make up-observability` | Langfuse tracing (6 containers, ~1.6 GB idle) |
 
-`make doctor` warns when the machine has less than 12 GB of RAM. On those machines, enable
-optional profiles one at a time.
+## How it works
 
-## Layout
+### A run
 
 ```
-src/orchestraos/
-  config.py      # settings from .env (model names are required, never hardcoded)
-  ollama.py      # Ollama REST helpers: list pulled models, find missing ones
-  doctor.py      # `orchestraos-doctor` setup checks
-  cli.py         # `orchestraos run "<goal>"`
-  llm/router.py  # small vs large model per step, retry once, then fall back
-  graph/         # supervisor StateGraph, typed state, planner, checkpointer, answer clean-up
-  agents/        # research (local or over A2A), analytics, writing, action; each a subgraph
-  a2a/           # research agent as an A2A service (a2a-sdk): Agent Card + JSON-RPC
-  observability.py # Langfuse tracing (opt-in), sessions per thread
-  memory/        # memory agent: ChromaDB (semantic) + Neo4j (graph), recall/remember subgraphs
-  tools/         # tool logic: workspace files, web search/fetch, Docker sandbox, MCP client
-  mcp_servers/   # FastMCP servers (stdio): search, filesystem, python_sandbox
-  api/           # FastAPI: runs as background tasks, SSE events, workspace files
-ui/app.py        # Streamlit chat UI (talks to the API only)
-scripts/         # setup helper
-sandbox/         # Dockerfile for the no-network Python sandbox
-examples/        # sample data (copy into workspace/ to try the analytics agent)
-tests/           # pytest; LLMs are faked, Docker tests skip if the sandbox image is missing
-docs/            # project brief
+goal -> recall_memory -> triage (small model: "direct" or "plan")
+     -> plan (large model: JSON steps, ending with "writing", or "writing" then "action")
+     -> one agent node per step, in plan order
+     -> finalize (answer clean-up, de-duplicated sources) -> store_memory
 ```
 
-## Development
+The **model router** sends routing, classification and extraction to the 3B model, and
+planning, code and writing to the 7B model. If a call fails or returns invalid JSON, the router
+retries once, then falls back to the other model. Model names come from `.env`, never from code.
 
-```bash
-make test    # pytest
-make lint    # ruff check + format check
-make dev     # API with auto-reload on :8000 (host; uses your Docker for the sandbox)
-make ui      # Streamlit UI on :8501, talking to the API on :8000
-```
+### Agents
 
-`GET /health` returns `ok` when Ollama is reachable and every configured model is pulled,
-otherwise `degraded` with the reason (the API itself is still up, so it returns 200).
-
-## API
-
-| Endpoint | |
-|---|---|
-| `POST /runs {goal}` | start a run in the background -> `{thread_id}` |
-| `GET /runs/{id}/events?after=n` | SSE: `triage`, `plan`, `step`, `token` (writer, live), `interrupt` (approval needed), `final`, `error`, `done`; replays from event `n` |
-| `GET /runs/{id}` | state from the checkpointer (works after an API restart) |
-| `POST /runs/{id}/resume` | continue a run that stopped part-way |
-| `POST /runs/{id}/approval {approved, note}` | answer a pending approval; the run continues |
-| `GET/POST /files`, `GET /files/{path}` | list, upload, download workspace files (path-checked) |
-| `GET /health` | Ollama reachable + models pulled |
-
-Runs don't live inside the HTTP request: they take minutes on a laptop, and Streamlit re-runs
-its script on every interaction. The UI follows a run's event stream and reconnects from the
-last event it saw.
-
-In Docker, the API starts sandbox containers through the host's Docker socket (`make setup`
-writes the workspace's host path to `.env` as `HOST_WORKSPACE`). That gives the API container
-control of Docker: fine for a local single-user app, not for anything shared.
-
-## Tools and sandboxing
-
-Tools live in three MCP servers (official `mcp` SDK, stdio). The app starts each one once and
-loads its tools through `langchain-mcp-adapters`.
-
-| Server | Tools | Guard rails |
-|---|---|---|
-| `search` | `web_search`, `fetch_page` | public http(s) only; every redirect hop re-checked (no SSRF to localhost / private IPs) |
-| `filesystem` | `list_files`, `read_file` (text, PDF), `write_file` | paths resolved and confined to `workspace/` |
-| `python_sandbox` | `run_python` | Docker: `--network none`, 512 MB, 1 CPU, 128 pids, read-only root, no capabilities, workspace read-only at `/data`, output to `workspace/outputs/<run>/` |
-
-## Agents
-
-Each agent is a fixed LangGraph pipeline, not a free-form tool-calling loop. With 7B local
-models, tool-calling loops are unreliable; giving each LLM call one narrow job (write search
+Each agent is a fixed LangGraph subgraph, not a free-form tool-calling loop. 7B local models
+are unreliable at long tool-calling loops. Giving each LLM call one narrow job (write search
 queries, write code, write prose) and letting code make the tool calls works much better.
 
 | Agent | Pipeline | Output |
 |---|---|---|
-| research | plan queries -> search + fetch pages (and local docs named in the task) -> synthesize | findings with `[n]` citations + source URLs |
-| analytics | find data -> profile it in the sandbox -> write code -> run -> fix on error (max 2) -> report | printed results + chart files |
-| writing | draft | markdown answer |
-| action | propose writes -> **`interrupt()`: wait for the user** -> write only if approved | saved file paths, or "not saved" |
+| research | plan queries → search + fetch pages (+ local docs named in the goal) → synthesize | findings with `[n]` citations and sources |
+| analytics | find data → profile it in the sandbox → write code → run → fix on error (max 2) → report | printed results + chart files |
+| writing | draft | the markdown answer |
+| action | propose writes → **`interrupt()`: wait for the user** → write only if approved | saved paths, or "not saved" |
 
-After the writer, code (not the model) has the last word on the answer:
-- image links to files no step produced are removed, and charts the writer forgot are appended
-- source URLs no tool returned are removed (with no research step, a 7B model still wrote `[1]`
-  and invented a plausible URL)
-- if any step failed, a notice saying so goes at the top, so made-up figures can't pass as real
+Each agent gets a restricted view of the tools. Only the action agent can call `write_file`.
 
-### Tracing (Langfuse)
+### Code checks the answer, not the model
 
-Self-hosted Langfuse 4.75 runs in the `observability` profile: the official stack (web, worker,
-Postgres, ClickHouse, Redis, MinIO) minus the optional AI gateway, with telemetry off, only the
-UI published (localhost:3000), and memory caps. `make setup` generates every secret and the
-project's API keys, and Langfuse creates the project from them on first start (no sign-up step).
+After the writer, `finalize` applies these rules in code:
+- **Made-up links:** image links to files no step produced are removed, and real charts the
+  writer forgot are appended.
+- **Made-up sources:** URLs no tool returned are removed, along with citation numbers when
+  nothing was researched.
+- **Failed steps:** if any step failed, a notice at the top says so, so invented figures can't
+  pass as real ones.
 
-```bash
-make up-observability          # then set TRACING=true in .env (off by default)
-uv run orchestraos run "Analyse sales.csv: total units per region"
-```
+Each of these was added after a live run showed the 7B model doing the opposite.
 
-One LangChain callback handler attached to the supervisor traces each run as one trace: every
-supervisor node, each agent subgraph and its nodes, every MCP tool call, and every LLM call with
-model, tokens and latency. A run's traces share a Langfuse session (its thread id), so a run
-paused for approval and resumed later stays together. The A2A research service traces too.
+### Human approval
 
-Measured: a research + analytics run produced 48 observations (26 chain spans, 13 MCP tool
-calls, 6 LLM generations, 3 agents). On the first live run the end of the trace went missing:
-the SDK's 5 s export timeout was too short while a model saturated the laptop, so the final,
-largest batch was aborted mid-upload. The export timeout is now 30 s.
+The action agent proposes writes, then calls `interrupt()`. The run pauses and is checkpointed.
+The UI shows every proposed write (path, size, overwrite warning, preview), and
+`POST /runs/{id}/approval` resumes the run with your decision, which is recorded in the run's
+state. To save a long answer, the model doesn't retype it: the action says "save step N's
+output" and code copies it exactly.
+
+### Memory
+
+- **Semantic (ChromaDB, `nomic-embed-text`):** past goals and answers, plus facts you stated.
+  The similarity cut-offs are calibrated on real embeddings: related past runs scored 0.13–0.16
+  cosine distance and unrelated ones 0.49–0.58.
+- **Facts about you are always recalled:** your preferences apply to every goal, however
+  unrelated to the topic.
+- **Graph (Neo4j, optional):** facts are stored as `user -[prefers]-> bullet points`.
+- **Facts come only from your own words:** the small model extracts them from your goal, never
+  from an answer, so a hallucination can't become a memory.
+- **Best-effort:** if a memory store is down, the run carries on without it.
+
+### Tools and sandboxing (MCP)
+
+There are three MCP servers (FastMCP over stdio). The app starts each one once and loads its
+tools through `langchain-mcp-adapters`.
+
+| Server | Tools | Guard rails |
+|---|---|---|
+| `search` | `web_search`, `fetch_page` | public http(s) only; every redirect hop re-checked (no SSRF to localhost or private IPs) |
+| `filesystem` | `list_files`, `read_file` (text, PDF), `write_file` | paths resolved and confined to `workspace/` |
+| `python_sandbox` | `run_python` | Docker: `--network none`, 512 MB, 1 CPU, 128 pids, read-only root, no capabilities, data read-only at `/data` |
+
+In Docker, the API starts sandbox containers through the host's Docker socket. That gives the
+API container control of Docker, which is fine for a local single-user app but not for anything
+shared.
 
 ### Research over A2A
 
-The research agent is also a standalone [A2A](https://a2a-protocol.org) service built with the
-official `a2a-sdk`. Any A2A client can discover it from its Agent Card and send it tasks:
-
 ```bash
-make a2a-research                                   # serves on :8100
+make a2a-research                                       # serves on :8100
 curl http://localhost:8100/.well-known/agent-card.json
 RESEARCH_MODE=a2a uv run orchestraos run "Research what the A2A protocol is"
 ```
 
-With `RESEARCH_MODE=a2a` the supervisor's research step sends an A2A message (a data part with
-the instruction, goal and context) and reads the `findings` artifact (markdown + a data part
-with the sources) from the completed task. To the supervisor it's the same agent with a
-different transport: same `AgentState` in and out, and it wraps the same research subgraph.
-Remote failures (task state `FAILED`) become a failed step with the remote error message.
+With `RESEARCH_MODE=a2a`, the supervisor's research step sends an A2A message and reads the
+`findings` artifact from the completed task. It's the same research subgraph with a different
+transport, and the same `AgentState` goes in and out.
 
-### Memory across sessions
+### Tracing (Langfuse)
 
-The memory agent runs before planning (`recall`) and after answering (`remember`):
+Self-hosted Langfuse 4.75 runs in the `observability` profile. It's the official stack minus
+the optional AI gateway, with telemetry off, only the UI published (localhost:3000), and memory
+caps. `make setup` generates every secret and the API keys, so there's no sign-up step. Run
+`make up-observability`, then set `TRACING=true`.
 
-- **Semantic memory** (ChromaDB on disk, `nomic-embed-text` via Ollama): past goals + answers,
-  and facts the user stated. Cut-offs are calibrated on real embeddings: related past runs
-  scored 0.13-0.16 cosine distance, unrelated ones 0.49-0.58, so episodes must be within 0.35.
-- **Graph memory** (Neo4j, optional `graph` profile): facts as `user -[prefers]-> bullet points`.
-  Without Neo4j the app uses semantic memory only.
-- **Only the user's words become facts.** The small model extracts facts from the goal, never
-  from answers, so a hallucination can't become a "memory"; and it only runs when the goal has
-  first-person words ("I", "my", "we prefer").
-- Memory is best-effort: if a store is down, the run continues without it.
+Each run is one trace: every supervisor node, agent subgraph, MCP tool call and LLM call (with
+model, tokens and latency). A thread's traces share a Langfuse session, so a run paused for
+approval stays together.
 
-Measured: stating "I prefer answers as short bullet points" in one session, then asking
-"What is CrewAI?" in a fresh process, recalled `user prefers short bullet points` and the
-answer came back as short bullets.
+### API
 
-To use graph memory: `make up-graph`, then set `NEO4J_URI=bolt://localhost:7687` in `.env`.
+| Endpoint | |
+|---|---|
+| `POST /runs {goal}` | start a run in the background → `{thread_id}` |
+| `GET /runs/{id}/events?after=n` | SSE events: `triage`, `plan`, `step`, `token`, `interrupt`, `final`, `error`, `done`; replays from event `n` |
+| `GET /runs/{id}` | run state from the checkpointer (works after an API restart) |
+| `POST /runs/{id}/resume` | continue a run that stopped part-way |
+| `POST /runs/{id}/approval {approved, note}` | answer a pending approval |
+| `GET/POST /files`, `GET /files/{path}` | list, upload, download workspace files |
+| `GET /health` | Ollama reachable and models pulled |
 
-### Human approval for side effects
+A run doesn't live inside the HTTP request: it takes minutes on a laptop, and Streamlit
+re-runs its script on every interaction. The UI follows a run's event stream and reconnects
+from the last event it saw.
 
-The action agent is the only agent that can call `write_file` (each agent gets a restricted view
-of the tools), and it calls LangGraph's `interrupt()` before writing. The run pauses and is
-checkpointed; the UI shows every proposed write (path, size, overwrite warning, preview) with
-Approve / Reject; `POST /runs/{id}/approval` resumes the run with the decision. The decision is
-recorded in the run's state (`approvals`) and reported in the answer.
+## What building it taught me
 
-To save a long answer, the model doesn't retype it: an action says "save step N's output" and
-code copies it exactly. (When the model retyped it anyway, it saved a 200-character fragment, so
-content that matches an earlier step is now replaced with that step's full output.) If the goal
-asks to save to a file but the planner leaves out the action step, code adds it.
+These are real failures from live runs on an 8 GB laptop, and what fixed them:
 
-### What the first live runs taught us
+- **The model guessed column types** from raw CSV lines and summed a date column. Now a fixed
+  profiling script runs first, so the model sees the real types.
+- **pandas 3 broke generated code**, because the model writes pandas 2 code (for example the
+  `"M"` alias). The sandbox now pins pandas 2.x.
+- **The writer invented results for a failed step** and made up a source URL. Now code adds a
+  failure notice and drops unbacked URLs.
+- **The model retyped a long answer it was asked to save** and saved a 200-character fragment.
+  Now saves copy the earlier step's output exactly.
+- **LangGraph's `GraphInterrupt` is an `Exception` subclass**, so the "record agent errors"
+  handler swallowed approval pauses. The handler now re-raises `GraphBubbleUp`.
+- **The end of each trace went missing:** the 5 s export timeout aborted the last batch while
+  the model saturated the CPU. The export timeout is now 30 s.
+- **Speed:** the 7B model generated about 2–5 tokens/s, split between CPU and GPU. A 6144-token
+  context was noticeably faster than 8192.
 
-These came from running real goals on `qwen2.5:7b` / `qwen2.5:3b` on an 8 GB laptop:
+## Limitations
 
-- **The model guessed column types** from raw CSV lines and wrote code that summed a date
-  column. Fix: a fixed profiling script runs first, so the model sees real dtypes.
-- **pandas 3 broke generated code** (the `"M"` month alias was removed); the model couldn't fix
-  it even with the error message. Fix: the sandbox pins pandas 2.x.
-- **The writer invented results for a failed step**, despite being told not to. Fix: failed
-  steps are described plainly, and the failure notice above is added by code.
-- **Speed:** the 7B model generated ~2–5 tokens/s (CPU/GPU split); a smaller context window
-  (6144 instead of 8192) was noticeably faster. A CSV analysis + report took ~2 min; a goal with
-  web research + analysis + report took ~14 min. Phase 10 measures this properly.
+- **Small models make reasoning mistakes:** the benchmark failure above is one, and the code
+  checks catch made-up links, sources and figures but not wrong logic in correct-looking code.
+  A wrong fact in an answer with no sources (e.g. confusing vector databases with GIS vector
+  data) also gets through.
+- **It's slow on a laptop:** a CSV question takes about 2 minutes and a research question 3–5
+  minutes. Generation is the bottleneck at 2–5 tokens/s.
+- **The benchmark is small and was run twice:** 36 tasks give a clear signal, but LLM output
+  varies, and repeated runs would show the spread.
+- **It's single-user and local:** in Docker the API controls the host's Docker daemon to start
+  sandboxes, and there's no authentication. Don't expose it to a network.
+- **Web research depends on DuckDuckGo:** results change over time, and it can rate-limit
+  heavy use.
+
+## Development
+
+```bash
+make test    # pytest: LLMs are faked; Docker tests skip if the sandbox image is missing
+make lint    # ruff check + format check
+uv run pytest -m live          # also runs the live tests against Ollama
+uv run python -m evals.run     # the benchmark (see Results)
+```
+
+```
+src/orchestraos/
+  config.py        settings from .env
+  llm/router.py    small vs large model per step, retry, fall back
+  graph/           supervisor graph, state, planner, checkpointer, answer checks
+  agents/          research (local or A2A), analytics, writing, action
+  memory/          memory agent: ChromaDB + Neo4j, recall/remember subgraphs
+  tools/           workspace files, web search/fetch, Docker sandbox, MCP client
+  mcp_servers/     FastMCP servers: search, filesystem, python_sandbox
+  a2a/             research agent as an A2A service
+  api/             FastAPI: background runs, SSE, files
+  observability.py Langfuse tracing (opt-in)
+ui/app.py          Streamlit chat UI
+evals/             benchmark tasks, checks, runner, results
+sandbox/           Dockerfile for the Python sandbox
+examples/          sample data and notes used by the demo and the benchmark
+docs/              the original project brief and phase plan
+```

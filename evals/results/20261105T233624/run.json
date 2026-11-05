@@ -4,6 +4,6 @@
   "large_model": "qwen2.5:7b",
   "embed_model": "nomic-embed-text",
   "machine": "Windows 11, 7.3 GB RAM, 12 CPUs",
-  "commit": "c9dbf41",
+  "commit": "9ab4d92",
   "wall_minutes": 50
 }
