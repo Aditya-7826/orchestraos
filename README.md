@@ -158,6 +158,6 @@ These came from running real goals on `qwen2.5:7b` / `qwen2.5:3b` on an 8 GB lap
   it even with the error message. Fix: the sandbox pins pandas 2.x.
 - **The writer invented results for a failed step**, despite being told not to. Fix: failed
   steps are described plainly, and the failure notice above is added by code.
-- **Speed:** the 7B model generated ~2Ã¢â‚¬â€œ5 tokens/s (CPU/GPU split); a smaller context window
+- **Speed:** the 7B model generated ~2–5 tokens/s (CPU/GPU split); a smaller context window
   (6144 instead of 8192) was noticeably faster. A CSV analysis + report took ~2 min; a goal with
   web research + analysis + report took ~14 min. Phase 10 measures this properly.

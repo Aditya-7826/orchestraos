@@ -38,13 +38,13 @@ def format_results(results: list[StepResult]) -> str:
         if not r["ok"]:
             # Spell it out: small models otherwise "fill in" results for failed steps.
             blocks.append(
-                f"### Step {r['step_id']} â€” {r['agent']} (FAILED)\n"
+                f"### Step {r['step_id']} — {r['agent']} (FAILED)\n"
                 f"This step failed ({r['output'][:300]}). It produced no results; "
                 "do not report any numbers, findings or charts for it."
             )
             continue
         output = r["output"][:MAX_RESULT_CHARS]
-        block = f"### Step {r['step_id']} â€” {r['agent']}\n{output}"
+        block = f"### Step {r['step_id']} — {r['agent']}\n{output}"
         if r["sources"]:
             block += "\nSources: " + ", ".join(r["sources"])
         if r["artifacts"]:
