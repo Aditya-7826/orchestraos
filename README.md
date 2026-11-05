@@ -6,9 +6,21 @@ action), uses tools over MCP, asks for your approval before side effects, and an
 
 Everything runs locally: LLMs via [Ollama](https://ollama.com), no paid APIs, no cloud services.
 
-> **Status: Phase 0 (foundation).** Config, health check, setup doctor, Docker Compose with
-> profiles. Agents, memory, MCP tools, UI, A2A, tracing and evals come in later phases.
-> See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the full design.
+> **Status: Phase 2 of 10.** Model router and supervisor graph work end to end against
+> local models, with stub agents. Real agents, MCP tools, memory, UI, A2A, tracing and evals
+> come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the design and phase plan.
+
+## How a run works
+
+```
+goal -> recall_memory -> triage (small model: "direct" or "plan")
+     -> plan (large model: JSON list of steps, last one is always "writing")
+     -> research / analytics / action / writing nodes, one per step, in plan order
+     -> finalize (answer + de-duplicated sources) -> store_memory
+```
+
+State is checkpointed to SQLite after every node, so a run that stops part-way resumes
+where it left off: `uv run orchestraos run --thread <id>`.
 
 ## Quick start
 
@@ -46,6 +58,11 @@ src/orchestraos/
   config.py      # settings from .env (model names are required, never hardcoded)
   ollama.py      # Ollama REST helpers: list pulled models, find missing ones
   doctor.py      # `orchestraos-doctor` setup checks
+  cli.py         # `orchestraos run "<goal>"`
+  llm/router.py  # small vs large model per step, retry once, then fall back
+  graph/         # supervisor StateGraph, typed state, planner, SQLite checkpointer
+  agents/        # agent contract (each agent is a LangGraph subgraph)
+  memory/        # memory interface
   api/main.py    # FastAPI app: GET /health
 tests/           # pytest, no network or Docker needed
 docs/            # project brief

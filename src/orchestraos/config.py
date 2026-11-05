@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     workspace_dir: Path = Path("workspace")  # the only folder agents may write to
     data_dir: Path = Path("data")  # checkpoints, vector store, etc.
 
+    @property
+    def checkpoint_db(self) -> Path:
+        return self.data_dir / "checkpoints.sqlite"
+
     def required_models(self) -> list[str]:
         """Every Ollama model the system needs, without duplicates, in a stable order."""
         return list(dict.fromkeys([self.small_model, self.large_model, self.embed_model]))

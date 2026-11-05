@@ -11,9 +11,12 @@ dependencies = [
     "psutil>=6.0",
     "langchain-ollama>=1.1.0",
     "langchain-core>=1.7.6",
+    "langgraph>=1.2.20",
+    "langgraph-checkpoint-sqlite>=3.1.3",
 ]
 
 [project.scripts]
+orchestraos = "orchestraos.cli:main"
 orchestraos-doctor = "orchestraos.doctor:main"
 
 [dependency-groups]

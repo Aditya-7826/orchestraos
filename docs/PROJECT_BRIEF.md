@@ -57,7 +57,7 @@ _Not in the original brief; derived from the architecture above._
 |---|---|---|
 | 0 | Foundation: config, health, doctor, Compose profiles | ✅ |
 | 1 | Model router: small/large per step, retry once, fall back | ✅ |
-| 2 | Supervisor: typed state, planner, routing to stub agents, SQLite checkpointer | a run resumes after a restart |
+| 2 | Supervisor: typed state, planner, routing to stub agents, SQLite checkpointer | ✅ |
 | 3 | MCP tool servers: search, filesystem (workspace-only), python sandbox | each server testable on its own |
 | 4 | Research, writing and analytics agents | end-to-end report with sources and a chart |
 | 5 | FastAPI SSE + Streamlit chat UI | goal in, streamed steps and answer out |
