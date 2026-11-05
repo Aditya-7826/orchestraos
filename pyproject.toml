@@ -27,6 +27,7 @@ dependencies = [
     "neo4j>=6.4.1",
     "a2a-sdk[http-server]>=1.3.0",
     "langfuse>=5.2.0",
+    "pyyaml>=6.0.3",
 ]
 
 [project.scripts]
@@ -46,6 +47,7 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = [".", "tests"]
 addopts = "-ra -m 'not live'"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
