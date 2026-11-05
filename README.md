@@ -6,9 +6,9 @@ action), uses tools over MCP, asks for your approval before side effects, and an
 
 Everything runs locally: LLMs via [Ollama](https://ollama.com), no paid APIs, no cloud services.
 
-> **Status: Phase 2 of 10.** Model router and supervisor graph work end to end against
-> local models, with stub agents. Real agents, MCP tools, memory, UI, A2A, tracing and evals
-> come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the design and phase plan.
+> **Status: Phase 3 of 10.** Model router, supervisor graph and MCP tool servers (search,
+> workspace files, Docker Python sandbox) work against local models. Real agents, memory, UI,
+> A2A, tracing and evals come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the design and phase plan.
 
 ## How a run works
 
@@ -31,7 +31,8 @@ make setup                      # uv sync + create .env from .env.example
 ollama pull qwen2.5:3b          # small model: routing
 ollama pull qwen2.5:7b          # large model: planning / writing
 ollama pull nomic-embed-text    # embeddings
-make doctor                     # checks Ollama, models, Docker, RAM
+make sandbox-image              # build the Python sandbox image (one-off)
+make doctor                     # checks Ollama, models, Docker, sandbox image, RAM
 make up                         # core stack
 curl http://localhost:8000/health
 ```
@@ -63,6 +64,9 @@ src/orchestraos/
   graph/         # supervisor StateGraph, typed state, planner, SQLite checkpointer
   agents/        # agent contract (each agent is a LangGraph subgraph)
   memory/        # memory interface
+  tools/         # tool logic: workspace files, web search/fetch, Docker sandbox, MCP client
+  mcp_servers/   # FastMCP servers (stdio): search, filesystem, python_sandbox
+sandbox/         # Dockerfile for the no-network Python sandbox
   api/main.py    # FastAPI app: GET /health
 tests/           # pytest, no network or Docker needed
 docs/            # project brief
@@ -78,3 +82,14 @@ make dev     # API with auto-reload on :8000
 
 `GET /health` returns `ok` when Ollama is reachable and every configured model is pulled,
 otherwise `degraded` with the reason (the API itself is still up, so it returns 200).
+
+## Tools and sandboxing
+
+Tools live in three MCP servers (official `mcp` SDK, stdio). The app starts each one once and
+loads its tools through `langchain-mcp-adapters`.
+
+| Server | Tools | Guard rails |
+|---|---|---|
+| `search` | `web_search`, `fetch_page` | public http(s) only; every redirect hop re-checked (no SSRF to localhost / private IPs) |
+| `filesystem` | `list_files`, `read_file` (text, PDF), `write_file` | paths resolved and confined to `workspace/` |
+| `python_sandbox` | `run_python` | Docker: `--network none`, 512 MB, 1 CPU, 128 pids, read-only root, no capabilities, workspace read-only at `/data`, output to `workspace/outputs/<run>/` |

@@ -80,6 +80,20 @@ def check_docker(run: Callable[..., subprocess.CompletedProcess] = subprocess.ru
     return Check("Docker", ok=True, detail=f"engine {result.stdout.strip()}")
 
 
+def check_sandbox_image(
+    image: str, run: Callable[..., subprocess.CompletedProcess] = subprocess.run
+) -> Check:
+    try:
+        result = run(["docker", "image", "inspect", image], capture_output=True, timeout=20)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return Check(f"sandbox image {image}", ok=False, detail="docker unavailable")
+    if result.returncode != 0:
+        return Check(
+            f"sandbox image {image}", ok=False, detail="not built", hint="make sandbox-image"
+        )
+    return Check(f"sandbox image {image}", ok=True, detail="built")
+
+
 def check_memory(total_bytes: int) -> Check:
     total_gib = total_bytes / GIB
     if total_gib < FULL_STACK_RAM_GIB:
@@ -97,6 +111,7 @@ def run_checks(settings: Settings) -> list[Check]:
     return [
         *check_ollama(settings),
         check_docker(),
+        check_sandbox_image(settings.sandbox_image),
         check_memory(psutil.virtual_memory().total),
     ]
 

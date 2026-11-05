@@ -18,6 +18,7 @@ dependencies = [
     "ddgs>=9.16.1",
     "beautifulsoup4>=4.15.0",
     "aiosqlite>=0.22.1",
+    "pypdf>=6.21.4",
 ]
 
 [project.scripts]

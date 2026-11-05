@@ -40,6 +40,14 @@ def test_docker_running():
     assert doctor.check_docker(run=running).ok
 
 
+def test_sandbox_image_missing_gets_build_hint():
+    def missing(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, returncode=1)
+
+    check = doctor.check_sandbox_image("img", run=missing)
+    assert not check.ok and check.hint == "make sandbox-image"
+
+
 def test_low_ram_is_warning_not_failure():
     check = doctor.check_memory(8 * doctor.GIB)
     assert not check.ok and check.warn_only

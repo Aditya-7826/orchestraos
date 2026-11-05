@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     # "a2a":   supervisor calls the standalone research service over A2A.
     research_mode: Literal["local", "a2a"] = "local"
 
+    # --- Python sandbox (analytics agent) ---
+    sandbox_image: str = "orchestraos-sandbox:latest"
+    sandbox_memory: str = "512m"
+    # Only needed when the app itself runs in a container: the workspace's path on the host.
+    sandbox_host_workspace: Path | None = None
+
     # --- Paths ---
     workspace_dir: Path = Path("workspace")  # the only folder agents may write to
     data_dir: Path = Path("data")  # checkpoints, vector store, etc.
