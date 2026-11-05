@@ -10,6 +10,7 @@ from orchestraos.agents.action import build_action_agent
 from orchestraos.agents.analytics import build_analytics_agent
 from orchestraos.agents.base import Agent
 from orchestraos.agents.research import build_research_agent
+from orchestraos.agents.research_a2a import build_a2a_research_agent
 from orchestraos.agents.writing import build_writing_agent
 from orchestraos.config import Settings
 from orchestraos.graph.checkpoint import open_checkpointer
@@ -24,14 +25,21 @@ from orchestraos.tools.client import ToolCaller, open_toolset, restrict
 logger = logging.getLogger(__name__)
 
 
-def build_agents(router: ModelRouter, tools: ToolCaller) -> dict[str, Agent]:
+def build_agents(
+    router: ModelRouter, tools: ToolCaller, settings: Settings | None = None
+) -> dict[str, Agent]:
     """Each agent only gets the tools it needs. Only the action agent can write files,
     and it only does so after the user approves (see agents/action.py)."""
     read_only = ("list_files", "read_file")
-    return {
-        "research": build_research_agent(
+    if settings and settings.research_mode == "a2a":
+        # Same agent, different transport: it runs as its own service (a2a/research_service.py).
+        research = build_a2a_research_agent(settings.a2a_research_url)
+    else:
+        research = build_research_agent(
             router, restrict(tools, "web_search", "fetch_page", *read_only)
-        ),
+        )
+    return {
+        "research": research,
         "analytics": build_analytics_agent(router, restrict(tools, "run_python", *read_only)),
         "writing": build_writing_agent(router),
         "action": build_action_agent(router, restrict(tools, "write_file", "list_files")),
@@ -73,7 +81,7 @@ async def open_app(settings: Settings) -> AsyncIterator[CompiledStateGraph]:
     ):
         yield build_supervisor(
             router=router,
-            agents=build_agents(router, toolset),
+            agents=build_agents(router, toolset, settings),
             memory=memory,
             checkpointer=checkpointer,
         )

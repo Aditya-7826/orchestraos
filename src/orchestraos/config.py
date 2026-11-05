@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # "local": supervisor calls the research subgraph in-process.
     # "a2a":   supervisor calls the standalone research service over A2A.
     research_mode: Literal["local", "a2a"] = "local"
+    a2a_research_url: str = "http://localhost:8100/"  # the research service, for "a2a"
 
     # --- Memory ---
     memory_enabled: bool = True

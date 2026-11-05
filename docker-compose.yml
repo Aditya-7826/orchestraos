@@ -19,6 +19,8 @@ services:
       SANDBOX_HOST_WORKSPACE: ${HOST_WORKSPACE:?run `make setup` (sets HOST_WORKSPACE in .env)}
       # If .env enables graph memory (NEO4J_URI), reach Neo4j by its service name in Docker.
       NEO4J_URI: ${NEO4J_URI:+bolt://neo4j:7687}
+      # With RESEARCH_MODE=a2a (and `--profile a2a`), research runs in the `research` service.
+      A2A_RESEARCH_URL: http://research:8100/
     extra_hosts:
       - "host.docker.internal:host-gateway"  # needed on Linux; harmless elsewhere
     ports:
@@ -50,6 +52,24 @@ services:
     ports:
       - "${UI_PORT:-8501}:8501"
     mem_limit: 512m
+
+  # The research agent as a standalone A2A service (Agent Card at /.well-known/agent-card.json).
+  research:
+    image: orchestraos-app:latest
+    profiles: ["a2a"]
+    env_file: .env
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      WORKSPACE_DIR: /app/workspace
+      A2A_PUBLIC_URL: http://research:8100/
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["uvicorn", "orchestraos.a2a.research_service:app", "--host", "0.0.0.0", "--port", "8100"]
+    ports:
+      - "8100:8100"
+    volumes:
+      - ./workspace:/app/workspace:ro
+    mem_limit: 768m
 
   neo4j:
     image: neo4j:5.26-community

@@ -63,6 +63,6 @@ _Not in the original brief; derived from the architecture above._
 | 5 | FastAPI SSE + Streamlit chat UI | ✅ |
 | 6 | Action agent + human approval via `interrupt` | ✅ |
 | 7 | Memory: ChromaDB + Neo4j (`graph` profile) | ✅ |
-| 8 | Research agent over A2A (`RESEARCH_MODE=a2a`) | Agent Card served, supervisor calls it |
+| 8 | Research agent over A2A (`RESEARCH_MODE=a2a`) | ✅ |
 | 9 | Langfuse tracing (`observability` profile) | every agent step traced |
 | 10 | Evals: 30+ tasks with pass/fail checks | README metrics come from a real run |

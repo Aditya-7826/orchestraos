@@ -6,6 +6,8 @@ import pytest
 from orchestraos.tools.sandbox import DockerSandbox
 
 IMAGE = "orchestraos-sandbox:latest"
+# Generous: on an 8 GB laptop with a model loaded, starting a container alone can take 10s+.
+SLOW_MACHINE_TIMEOUT = 120
 
 
 def flag_value(cmd: list[str], flag: str) -> str:
@@ -66,7 +68,7 @@ df = pd.read_csv('/data/sales.csv')
 print(df['sales'].sum())
 df.plot(x='month', y='sales'); plt.savefig('chart.png')
 """
-    result = DockerSandbox(workspace=tmp_path).run_python(code)
+    result = DockerSandbox(workspace=tmp_path).run_python(code, SLOW_MACHINE_TIMEOUT)
     assert result["exit_code"] == 0, result["stderr"]
     assert result["stdout"].strip() == "40"
     assert len(result["files"]) == 1 and result["files"][0].endswith("/chart.png")
@@ -76,12 +78,14 @@ df.plot(x='month', y='sales'); plt.savefig('chart.png')
 @needs_docker
 def test_has_no_network(tmp_path):
     code = "import socket; socket.create_connection(('1.1.1.1', 53), timeout=3)"
-    result = DockerSandbox(workspace=tmp_path).run_python(code)
+    result = DockerSandbox(workspace=tmp_path).run_python(code, SLOW_MACHINE_TIMEOUT)
     assert result["exit_code"] != 0
     assert "OSError" in result["stderr"] or "unreachable" in result["stderr"].lower()
 
 
 @needs_docker
 def test_workspace_is_read_only(tmp_path):
-    result = DockerSandbox(workspace=tmp_path).run_python("open('/data/x.txt', 'w')")
+    result = DockerSandbox(workspace=tmp_path).run_python(
+        "open('/data/x.txt', 'w')", SLOW_MACHINE_TIMEOUT
+    )
     assert result["exit_code"] != 0 and "Read-only file system" in result["stderr"]
