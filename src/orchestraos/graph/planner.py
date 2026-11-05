@@ -6,6 +6,7 @@ to "plan" (the safer choice) and planning defaults to a single writing step.
 """
 
 import logging
+import re
 from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -63,10 +64,44 @@ async def make_plan(router: ModelRouter, goal: str, memory_context: str = "") ->
     return normalize_plan(result.parsed)
 
 
+_SAVE_REQUEST = re.compile(
+    r"\b(?:save|write|export|store|put)\b[^.?!]*?\b(?:to|as|in|into)\s+[`'\"]?"
+    r"([\w./\\-]+\.(?:md|txt|csv|json|html))",
+    re.IGNORECASE,
+)
+
+
+def requested_file(goal: str) -> str | None:
+    """The file the user asked to save to, e.g. 'notes/x.md' in '... and save it to notes/x.md'."""
+    match = _SAVE_REQUEST.search(goal)
+    return match.group(1) if match else None
+
+
+def ensure_save_step(steps: list[Step], goal: str) -> list[Step]:
+    """If the user asked to save to a file but the plan has no action step, add one.
+
+    The planner sometimes folds "and save it to x.md" into the writing step, but
+    the writing agent can't touch files; only the (approval-gated) action agent can.
+    """
+    path = requested_file(goal)
+    if not path or any(s["agent"] == "action" for s in steps):
+        return steps
+    steps = steps[: MAX_STEPS - 1]
+    instruction = f"Save the answer from the previous step to {path}"
+    return [*steps, Step(id=len(steps) + 1, agent="action", instruction=instruction)]
+
+
+def ends_well(steps: list[PlanStep]) -> bool:
+    """A plan ends with a writing step, or with writing then one action (e.g. save the report)."""
+    if steps[-1].agent == "writing":
+        return True
+    return len(steps) >= 2 and steps[-1].agent == "action" and steps[-2].agent == "writing"
+
+
 def normalize_plan(plan: Plan) -> list[Step]:
-    """Enforce the rules the model may have ignored: step limit and a final writing step."""
+    """Enforce the rules the model may have ignored: step limit and how a plan ends."""
     steps = plan.steps[:MAX_STEPS]
-    if steps[-1].agent != "writing":
+    if not ends_well(steps):
         steps = steps[: MAX_STEPS - 1]
         steps.append(PlanStep(agent="writing", instruction=FINAL_WRITING_INSTRUCTION))
     return [Step(id=i, agent=s.agent, instruction=s.instruction) for i, s in enumerate(steps, 1)]

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command
 
 from orchestraos.api.events import Event, to_events
 
@@ -71,6 +72,16 @@ class RunManager:
         run.status = "running"
         self._launch(run, command)
         return run
+
+    async def decide(self, thread_id: str, approved: bool, note: str = "") -> Run:
+        """Answer a pending approval: resumes the run inside the action agent's interrupt()."""
+        snapshot = await self.graph.aget_state(self.config(thread_id))
+        if not snapshot.values:
+            raise RunNotFound(thread_id)
+        pending = [i for task in snapshot.tasks for i in task.interrupts]
+        if not pending:
+            raise ValueError(f"run {thread_id} is not waiting for approval")
+        return await self.resume(thread_id, Command(resume={"approved": approved, "note": note}))
 
     def _launch(self, run: Run, graph_input: Any) -> None:
         self.runs[run.thread_id] = run

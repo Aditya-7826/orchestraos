@@ -20,7 +20,22 @@ def strip_outer_fence(answer: str) -> str:
     as code: any ```markdown block, or a plain ``` block that wraps the whole answer."""
     answer = _MARKDOWN_FENCE.sub(lambda m: m.group(1), answer)
     match = _OUTER_FENCE.match(answer.strip())
-    return match.group(1).strip() if match else answer.strip()
+    answer = match.group(1).strip() if match else answer.strip()
+    return drop_unmatched_fence(answer)
+
+
+def drop_unmatched_fence(answer: str) -> str:
+    """Remove a stray opening or closing ``` line (an odd number of fences would
+    otherwise turn the rest of the answer into a code block)."""
+    lines = answer.splitlines()
+    fences = [i for i, line in enumerate(lines) if line.strip().startswith("```")]
+    if len(fences) % 2 == 0:
+        return answer
+    if lines[fences[-1]].strip() == "```" and fences[-1] == len(lines) - 1:
+        del lines[fences[-1]]
+    elif lines[fences[0]].strip() in ("```", "```markdown", "```md") and fences[0] == 0:
+        del lines[fences[0]]
+    return "\n".join(lines).strip()
 
 
 def reconcile_images(answer: str, artifacts: list[str]) -> str:

@@ -14,13 +14,14 @@ from collections.abc import Mapping
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from orchestraos.agents.base import Agent, AgentState
 from orchestraos.graph import planner
 from orchestraos.graph.answer import failure_notice, reconcile_images, strip_outer_fence
-from orchestraos.graph.state import AGENT_NAMES, StepResult, SupervisorState
+from orchestraos.graph.state import AGENT_NAMES, Approval, StepResult, SupervisorState
 from orchestraos.llm.router import ModelRouter
 from orchestraos.memory.base import Memory
 
@@ -85,6 +86,7 @@ def build_supervisor(
             steps = planner.direct_plan(goal)
         else:
             steps = await planner.make_plan(router, goal, memory_context)
+        steps = planner.ensure_save_step(steps, goal)
         logger.info("plan: %s", [(s["agent"], s["instruction"]) for s in steps])
         return {"plan": steps}
 
@@ -96,7 +98,9 @@ def build_supervisor(
                 "instruction": step["instruction"],
                 "context": format_results(state.get("results", [])),
                 "memory": state.get("memory_context", ""),
+                "results": state.get("results", []),
             }
+            approvals: list[Approval] = []
             try:
                 out = await agent.ainvoke(task)
                 result = StepResult(
@@ -107,6 +111,12 @@ def build_supervisor(
                     sources=out.get("sources", []),
                     artifacts=out.get("artifacts", []),
                 )
+                if decision := out.get("approval"):
+                    approvals.append(Approval(step_id=step["id"], **decision))
+            except GraphBubbleUp:
+                # interrupt() for human approval works by raising GraphInterrupt, which is an
+                # Exception subclass. It must reach LangGraph, not be recorded as a failure.
+                raise
             except Exception as exc:  # one failing agent shouldn't sink the whole run
                 logger.exception("%s agent failed on step %s", name, step["id"])
                 result = StepResult(
@@ -117,7 +127,11 @@ def build_supervisor(
                     sources=[],
                     artifacts=[],
                 )
-            return {"results": [result], "current_step": state["current_step"] + 1}
+            return {
+                "results": [result],
+                "approvals": approvals,
+                "current_step": state["current_step"] + 1,
+            }
 
         run_agent.__name__ = f"run_{name}"
         return run_agent
@@ -131,6 +145,9 @@ def build_supervisor(
         failed = [(r["step_id"], r["agent"], r["output"][:300]) for r in results if not r["ok"]]
         if notice := failure_notice(failed):
             answer = f"{notice}\n\n{answer}"
+        # Actions usually run after the writer, so report what they did (saved / declined).
+        if done := [r["output"] for r in results if r["agent"] == "action" and r["ok"]]:
+            answer += "\n\n---\n" + "\n".join(f"**{line}**" for line in done)
         # Every source any step used, de-duplicated, in first-seen order.
         sources = list(dict.fromkeys(s for r in results for s in r["sources"]))
         return {

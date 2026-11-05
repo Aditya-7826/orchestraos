@@ -5,7 +5,8 @@ POST /runs        {goal}        start a run -> {thread_id}
 GET  /runs/{id}/events?after=n  SSE stream of the run's events (replays from n)
 GET  /runs/{id}                 run state from the checkpointer
 POST /runs/{id}/resume          continue a run that stopped part-way
-GET  /files                     list workspace files
+POST /runs/{id}/approval        approve or reject the pending action {approved, note}
+GET  /files                    list workspace files
 POST /files                     upload a file into the workspace
 GET  /files/{path}              download a workspace file (e.g. a chart)
 """
@@ -51,6 +52,11 @@ class RunRequest(BaseModel):
 
 class RunStarted(BaseModel):
     thread_id: str
+
+
+class Decision(BaseModel):
+    approved: bool
+    note: str = Field(default="", max_length=1000)
 
 
 def create_app(
@@ -127,6 +133,16 @@ def create_app(
     async def resume_run(thread_id: str, manager: Runs) -> RunStarted:
         try:
             await manager.resume(thread_id)
+        except RunNotFound:
+            raise HTTPException(404, f"no run {thread_id}") from None
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return RunStarted(thread_id=thread_id)
+
+    @app.post("/runs/{thread_id}/approval", status_code=202, response_model=RunStarted)
+    async def decide(thread_id: str, body: Decision, manager: Runs) -> RunStarted:
+        try:
+            await manager.decide(thread_id, body.approved, body.note)
         except RunNotFound:
             raise HTTPException(404, f"no run {thread_id}") from None
         except ValueError as exc:

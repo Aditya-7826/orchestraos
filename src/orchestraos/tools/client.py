@@ -62,6 +62,25 @@ class Toolset:
         return [tools[n] for n in names]
 
 
+@dataclass
+class RestrictedTools:
+    """A view of a ToolCaller that only allows some tools (least privilege per agent)."""
+
+    inner: ToolCaller
+    allowed: frozenset[str]
+
+    async def call(self, name: str, **args: Any) -> Any:
+        if name not in self.allowed:
+            raise PermissionError(
+                f"tool {name!r} is not allowed here; allowed: {sorted(self.allowed)}"
+            )
+        return await self.inner.call(name, **args)
+
+
+def restrict(tools: ToolCaller, *names: str) -> RestrictedTools:
+    return RestrictedTools(tools, frozenset(names))
+
+
 def _text(content: Any) -> str:
     if isinstance(content, str):
         return content

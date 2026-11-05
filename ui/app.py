@@ -117,8 +117,10 @@ def follow(active: dict) -> None:
             params = {"after": active["events_seen"]}
             with connect_sse(client, "GET", url, params=params) as source:
                 for sse in source.iter_sse():
+                    if not sse.data or not sse.id:  # keep-alive pings while the model thinks
+                        continue
                     event = json.loads(sse.data)
-                    active["events_seen"] += 1
+                    active["events_seen"] = int(sse.id) + 1  # resume point if we reconnect
                     if event["type"] == "token":
                         draft += event["text"]
                         answer_box.markdown(draft + "▌")
@@ -132,12 +134,19 @@ def follow(active: dict) -> None:
                         with status:
                             render_progress([event])
 
-        label = {"completed": "Done", "failed": "Failed", "interrupted": "Waiting"}
+        label = {"completed": "Done", "failed": "Failed", "interrupted": "Waiting for you"}
         status.update(
             label=label.get(done["status"], "Stopped") if done else "Stopped",
             state="error" if done and done["status"] == "failed" else "complete",
             expanded=False,
         )
+
+    if done and done["status"] == "interrupted":
+        # The action agent is waiting for approval: keep the run active and ask the user.
+        requests = [e["value"] for e in active["events"] if e["type"] == "interrupt"]
+        active["pending"] = requests[-1] if requests else None
+        active["draft"] = draft
+        st.rerun()
 
     state.history.append(
         {
@@ -151,6 +160,38 @@ def follow(active: dict) -> None:
     )
     state.active = None
     st.rerun()
+
+
+def ask_for_approval(active: dict) -> None:
+    """Show the pending side effects and let the user approve or reject them."""
+    request = active["pending"]
+    with st.chat_message("user"):
+        st.markdown(active["goal"])
+    with st.chat_message("assistant"):
+        with st.expander("How I did it", expanded=False):
+            render_progress(active["events"])
+        if active.get("draft"):
+            render_markdown_with_images(active["draft"])
+        st.info("**I'd like to make these changes. Nothing happens until you approve.**", icon="✋")
+        for action in request["actions"]:
+            warning = " — ⚠️ **overwrites an existing file**" if action["overwrite"] else ""
+            st.markdown(
+                f"`{action['tool']}` → `{action['path']}` ({action['chars']:,} chars){warning}"
+            )
+            with st.expander("Preview"):
+                st.code(action["preview"], language="markdown")
+        note = st.text_input("Note (optional)", key=f"note-{active['thread_id']}")
+        approve, reject = st.columns(2)
+        decision = None
+        if approve.button("Approve", type="primary", use_container_width=True):
+            decision = True
+        if reject.button("Reject", use_container_width=True):
+            decision = False
+        if decision is not None:
+            body = {"approved": decision, "note": note}
+            api("POST", f"/runs/{active['thread_id']}/approval", json=body)
+            active["pending"] = None
+            st.rerun()
 
 
 # --- page -------------------------------------------------------------------
@@ -187,7 +228,9 @@ with st.sidebar:
 for turn in state.history:
     render_turn(turn)
 
-if state.active:
+if state.active and state.active.get("pending"):
+    ask_for_approval(state.active)
+elif state.active:
     follow(state.active)
 
 if goal := st.chat_input("What should I do? e.g. “Analyse sales.csv and chart revenue”"):

@@ -6,9 +6,9 @@ action), uses tools over MCP, asks for your approval before side effects, and an
 
 Everything runs locally: LLMs via [Ollama](https://ollama.com), no paid APIs, no cloud services.
 
-> **Status: Phase 5 of 10.** Chat UI -> streaming API -> supervisor -> research, analytics and
-> writing agents work end to end on local models, in Docker or on the host. Approvals, memory,
-> A2A, tracing and evals come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the phase plan.
+> **Status: Phase 6 of 10.** Chat UI -> streaming API -> supervisor -> research, analytics,
+> writing and action agents work end to end on local models, with human approval before any
+> file is written. Memory, A2A, tracing and evals come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the phase plan.
 
 ## How a run works
 
@@ -92,9 +92,10 @@ otherwise `degraded` with the reason (the API itself is still up, so it returns 
 | Endpoint | |
 |---|---|
 | `POST /runs {goal}` | start a run in the background -> `{thread_id}` |
-| `GET /runs/{id}/events?after=n` | SSE: `triage`, `plan`, `step`, `token` (writer, live), `final`, `error`, `done`; replays from event `n` |
+| `GET /runs/{id}/events?after=n` | SSE: `triage`, `plan`, `step`, `token` (writer, live), `interrupt` (approval needed), `final`, `error`, `done`; replays from event `n` |
 | `GET /runs/{id}` | state from the checkpointer (works after an API restart) |
 | `POST /runs/{id}/resume` | continue a run that stopped part-way |
+| `POST /runs/{id}/approval {approved, note}` | answer a pending approval; the run continues |
 | `GET/POST /files`, `GET /files/{path}` | list, upload, download workspace files (path-checked) |
 | `GET /health` | Ollama reachable + models pulled |
 
@@ -128,11 +129,24 @@ queries, write code, write prose) and letting code make the tool calls works muc
 | research | plan queries -> search + fetch pages (and local docs named in the task) -> synthesize | findings with `[n]` citations + source URLs |
 | analytics | find data -> profile it in the sandbox -> write code -> run -> fix on error (max 2) -> report | printed results + chart files |
 | writing | draft | markdown answer |
-| action | stub until phase 6 | |
+| action | propose writes -> **`interrupt()`: wait for the user** -> write only if approved | saved file paths, or "not saved" |
 
 After the writer, code (not the model) has the last word on the answer:
 - image links to files no step produced are removed, and charts the writer forgot are appended
 - if any step failed, a notice saying so goes at the top, so made-up figures can't pass as real
+
+### Human approval for side effects
+
+The action agent is the only agent that can call `write_file` (each agent gets a restricted view
+of the tools), and it calls LangGraph's `interrupt()` before writing. The run pauses and is
+checkpointed; the UI shows every proposed write (path, size, overwrite warning, preview) with
+Approve / Reject; `POST /runs/{id}/approval` resumes the run with the decision. The decision is
+recorded in the run's state (`approvals`) and reported in the answer.
+
+To save a long answer, the model doesn't retype it: an action says "save step N's output" and
+code copies it exactly. (When the model retyped it anyway, it saved a 200-character fragment, so
+content that matches an earlier step is now replaced with that step's full output.) If the goal
+asks to save to a file but the planner leaves out the action step, code adds it.
 
 ### What the first live runs taught us
 
@@ -144,6 +158,6 @@ These came from running real goals on `qwen2.5:7b` / `qwen2.5:3b` on an 8 GB lap
   it even with the error message. Fix: the sandbox pins pandas 2.x.
 - **The writer invented results for a failed step**, despite being told not to. Fix: failed
   steps are described plainly, and the failure notice above is added by code.
-- **Speed:** the 7B model generated ~2â€“5 tokens/s (CPU/GPU split); a smaller context window
+- **Speed:** the 7B model generated ~2Ã¢â‚¬â€œ5 tokens/s (CPU/GPU split); a smaller context window
   (6144 instead of 8192) was noticeably faster. A CSV analysis + report took ~2 min; a goal with
   web research + analysis + report took ~14 min. Phase 10 measures this properly.

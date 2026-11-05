@@ -12,6 +12,8 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from orchestraos.graph.state import StepResult
+
 
 class AgentState(TypedDict, total=False):
     # --- task (set by the supervisor) ---
@@ -19,10 +21,12 @@ class AgentState(TypedDict, total=False):
     instruction: str  # this step's instruction from the plan
     context: str  # formatted results of earlier steps
     memory: str  # recalled memory context
+    results: list[StepResult]  # earlier steps' raw results (e.g. to save one to a file)
     # --- output (set by the agent) ---
     output: str
     sources: list[str]
     artifacts: list[str]
+    approval: dict  # set by agents that asked the user: {action, approved, note}
 
 
 Agent = CompiledStateGraph

@@ -53,3 +53,16 @@ def test_keeps_answers_that_only_contain_code_blocks():
 def test_unwraps_markdown_fence_followed_by_text():
     answer = "```markdown\n## Units\n\n| a | b |\n```\n\nSources: [1] sales.csv"
     assert strip_outer_fence(answer) == "## Units\n\n| a | b |\n\nSources: [1] sales.csv"
+
+
+def test_drops_stray_closing_fence():
+    assert strip_outer_fence("# Checklist\n\n- [ ] tests\n```") == "# Checklist\n\n- [ ] tests"
+
+
+def test_drops_stray_opening_fence():
+    assert strip_outer_fence("```markdown\n# Checklist\n- a") == "# Checklist\n- a"
+
+
+def test_keeps_balanced_code_blocks():
+    answer = "Run:\n```bash\nmake up\n```\nDone."
+    assert strip_outer_fence(answer) == answer

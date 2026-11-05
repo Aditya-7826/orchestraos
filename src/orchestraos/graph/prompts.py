@@ -22,7 +22,8 @@ Rules:
 - Only use "research" if the goal needs information from the web or from documents.
   Analysing a data file the user names needs "analytics", not "research".
 - Each instruction must be specific and self-contained.
-- The last step must be a "writing" step that produces the answer for the user.
+- The last step must be a "writing" step that produces the answer for the user,
+  except: if the user asks to save the answer to a file, put one "action" step after it.
 
 Reply with JSON only, in this shape:
 {{"steps": [{{"agent": "research", "instruction": "..."}},

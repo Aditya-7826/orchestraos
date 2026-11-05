@@ -5,8 +5,9 @@ from contextlib import asynccontextmanager
 
 from langgraph.graph.state import CompiledStateGraph
 
+from orchestraos.agents.action import build_action_agent
 from orchestraos.agents.analytics import build_analytics_agent
-from orchestraos.agents.base import Agent, build_stub_agent
+from orchestraos.agents.base import Agent
 from orchestraos.agents.research import build_research_agent
 from orchestraos.agents.writing import build_writing_agent
 from orchestraos.config import Settings
@@ -14,15 +15,20 @@ from orchestraos.graph.checkpoint import open_checkpointer
 from orchestraos.graph.supervisor import build_supervisor
 from orchestraos.llm.router import ModelRouter
 from orchestraos.memory.base import NullMemory
-from orchestraos.tools.client import ToolCaller, open_toolset
+from orchestraos.tools.client import ToolCaller, open_toolset, restrict
 
 
 def build_agents(router: ModelRouter, tools: ToolCaller) -> dict[str, Agent]:
+    """Each agent only gets the tools it needs. Only the action agent can write files,
+    and it only does so after the user approves (see agents/action.py)."""
+    read_only = ("list_files", "read_file")
     return {
-        "research": build_research_agent(router, tools),
-        "analytics": build_analytics_agent(router, tools),
+        "research": build_research_agent(
+            router, restrict(tools, "web_search", "fetch_page", *read_only)
+        ),
+        "analytics": build_analytics_agent(router, restrict(tools, "run_python", *read_only)),
         "writing": build_writing_agent(router),
-        "action": build_stub_agent("action"),
+        "action": build_action_agent(router, restrict(tools, "write_file", "list_files")),
     }
 
 
