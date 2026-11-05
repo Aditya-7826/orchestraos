@@ -6,9 +6,11 @@ as long as the `open_toolset` context is open, instead of a new process per call
 
 import os
 import sys
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
+from typing import Any, Protocol
 
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -24,9 +26,32 @@ SERVER_MODULES = {
 }
 
 
+class ToolCallError(RuntimeError):
+    """The tool ran but reported an error (bad path, blocked URL, search failure, ...)."""
+
+
+class ToolCaller(Protocol):
+    """All an agent needs from the tool layer. Tests pass a fake; the app passes a Toolset."""
+
+    async def call(self, name: str, **args: Any) -> Any: ...
+
+
 @dataclass
 class Toolset:
     by_server: dict[str, list[BaseTool]]
+
+    async def call(self, name: str, **args: Any) -> Any:
+        """Call a tool and return its structured result, or raise ToolCallError."""
+        (tool,) = self.get(name)
+        call = {"type": "tool_call", "id": uuid.uuid4().hex, "name": name, "args": args}
+        message = await tool.ainvoke(call)
+        if message.status == "error":
+            raise ToolCallError(_text(message.content))
+        structured = (message.artifact or {}).get("structured_content")
+        if structured is None:
+            return _text(message.content)
+        # FastMCP wraps non-object return values (lists, strings) as {"result": value}.
+        return structured["result"] if set(structured) == {"result"} else structured
 
     def get(self, *names: str) -> list[BaseTool]:
         """Tools by name, e.g. toolset.get("web_search", "fetch_page")."""
@@ -35,6 +60,12 @@ class Toolset:
         if missing:
             raise KeyError(f"unknown tools: {missing}; available: {sorted(tools)}")
         return [tools[n] for n in names]
+
+
+def _text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    return "\n".join(block.get("text", "") for block in content if isinstance(block, dict))
 
 
 def server_connections(

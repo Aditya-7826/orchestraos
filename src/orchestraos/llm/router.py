@@ -30,6 +30,7 @@ class TaskKind(StrEnum):
     CLASSIFY = "classify"
     PLAN = "plan"
     WRITE = "write"
+    CODE = "code"
 
 
 SMALL_MODEL_TASKS = frozenset({TaskKind.ROUTE, TaskKind.CLASSIFY})
@@ -113,12 +114,16 @@ class ModelRouter:
         # Imported here so the core router logic doesn't require langchain-ollama.
         from langchain_ollama import ChatOllama
 
-        def ollama(name: str) -> NamedModel:
-            return NamedModel(
-                name, ChatOllama(model=name, base_url=settings.ollama_base_url, temperature=0)
+        def ollama(name: str, num_ctx: int) -> NamedModel:
+            model = ChatOllama(
+                model=name, base_url=settings.ollama_base_url, temperature=0, num_ctx=num_ctx
             )
+            return NamedModel(name, model)
 
-        return cls(small=ollama(settings.small_model), large=ollama(settings.large_model))
+        return cls(
+            small=ollama(settings.small_model, settings.small_model_ctx),
+            large=ollama(settings.large_model, settings.large_model_ctx),
+        )
 
     def order_for(self, kind: TaskKind) -> tuple[NamedModel, NamedModel]:
         """(primary, fallback) for a task kind."""

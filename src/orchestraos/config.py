@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     small_model: str  # ~3B: routing / classification
     large_model: str  # ~7-8B tool-calling instruct model: planning / writing
     embed_model: str  # embeddings for semantic memory
+    # Context window (tokens). Ollama's default is small; research/writing prompts need more.
+    # Bigger windows cost RAM (KV cache), so keep these modest on 8 GB machines.
+    small_model_ctx: int = 4096
+    large_model_ctx: int = 6144  # measured: faster generation than 8192 on an 8 GB laptop
 
     # --- Agents ---
     # "local": supervisor calls the research subgraph in-process.

@@ -48,3 +48,4 @@ class SupervisorState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
     final_answer: str
     sources: list[str]
+    artifacts: list[str]  # files produced by successful steps (charts, ...)

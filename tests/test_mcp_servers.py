@@ -4,7 +4,7 @@ import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
 from orchestraos.mcp_servers import filesystem, python_sandbox, search
-from orchestraos.tools.client import open_toolset, server_connections
+from orchestraos.tools.client import ToolCallError, open_toolset, server_connections
 from orchestraos.tools.sandbox import DockerSandbox
 
 
@@ -53,3 +53,12 @@ async def test_toolset_reports_unknown_tools(settings, tmp_path):
     async with open_toolset(settings, servers=["filesystem"]) as toolset:
         with pytest.raises(KeyError, match="web_search"):
             toolset.get("web_search")
+
+
+async def test_toolset_call_returns_structured_data_or_raises(settings, tmp_path):
+    settings = settings.model_copy(update={"workspace_dir": tmp_path})
+    async with open_toolset(settings, servers=["filesystem"]) as toolset:
+        assert await toolset.call("write_file", path="a.txt", content="x") == "a.txt"
+        assert await toolset.call("list_files") == ["a.txt"]
+        with pytest.raises(ToolCallError, match="outside the workspace"):
+            await toolset.call("read_file", path="../nope.txt")

@@ -93,7 +93,9 @@ async def test_failing_agent_is_recorded_and_run_continues():
     state = await app.ainvoke({"goal": "g"})
     research_result = state["results"][0]
     assert not research_result["ok"] and "search is down" in research_result["output"]
-    assert state["final_answer"] == "[writing stub] y"
+    assert state["final_answer"].startswith("> **Some steps failed.**")
+    assert "Step 1 (research) failed: Error: search is down" in state["final_answer"]
+    assert state["final_answer"].endswith("[writing stub] y")
 
 
 async def test_unparseable_plan_falls_back_to_single_writing_step():
@@ -216,10 +218,12 @@ def test_format_results_marks_failures_and_lists_sources():
         [
             {"step_id": 1, "agent": "research", "ok": True, "output": "o",
              "sources": ["https://x"], "artifacts": []},
-            {"step_id": 2, "agent": "analytics", "ok": False, "output": "Error: boom",
+            {"step_id": 2, "agent": "analytics", "ok": True, "output": "40",
              "sources": [], "artifacts": ["chart.png"]},
+            {"step_id": 3, "agent": "action", "ok": False, "output": "Error: boom",
+             "sources": [], "artifacts": []},
         ]
     )  # fmt: skip
     assert "Sources: https://x" in text
-    assert "analytics (FAILED)" in text
     assert "Files: chart.png" in text
+    assert "action (FAILED)" in text and "Error: boom" in text

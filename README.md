@@ -6,9 +6,9 @@ action), uses tools over MCP, asks for your approval before side effects, and an
 
 Everything runs locally: LLMs via [Ollama](https://ollama.com), no paid APIs, no cloud services.
 
-> **Status: Phase 3 of 10.** Model router, supervisor graph and MCP tool servers (search,
-> workspace files, Docker Python sandbox) work against local models. Real agents, memory, UI,
-> A2A, tracing and evals come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the design and phase plan.
+> **Status: Phase 4 of 10.** The supervisor, MCP tool servers and the research, analytics and
+> writing agents work end to end on local models. UI, approvals, memory, A2A, tracing and
+> evals come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the phase plan.
 
 ## How a run works
 
@@ -61,14 +61,15 @@ src/orchestraos/
   doctor.py      # `orchestraos-doctor` setup checks
   cli.py         # `orchestraos run "<goal>"`
   llm/router.py  # small vs large model per step, retry once, then fall back
-  graph/         # supervisor StateGraph, typed state, planner, SQLite checkpointer
-  agents/        # agent contract (each agent is a LangGraph subgraph)
+  graph/         # supervisor StateGraph, typed state, planner, checkpointer, answer clean-up
+  agents/        # research, analytics, writing (+ action stub); each a LangGraph subgraph
   memory/        # memory interface
   tools/         # tool logic: workspace files, web search/fetch, Docker sandbox, MCP client
   mcp_servers/   # FastMCP servers (stdio): search, filesystem, python_sandbox
-sandbox/         # Dockerfile for the no-network Python sandbox
   api/main.py    # FastAPI app: GET /health
-tests/           # pytest, no network or Docker needed
+sandbox/         # Dockerfile for the no-network Python sandbox
+examples/        # sample data (copy into workspace/ to try the analytics agent)
+tests/           # pytest; LLMs are faked, Docker tests skip if the sandbox image is missing
 docs/            # project brief
 ```
 
@@ -93,3 +94,34 @@ loads its tools through `langchain-mcp-adapters`.
 | `search` | `web_search`, `fetch_page` | public http(s) only; every redirect hop re-checked (no SSRF to localhost / private IPs) |
 | `filesystem` | `list_files`, `read_file` (text, PDF), `write_file` | paths resolved and confined to `workspace/` |
 | `python_sandbox` | `run_python` | Docker: `--network none`, 512 MB, 1 CPU, 128 pids, read-only root, no capabilities, workspace read-only at `/data`, output to `workspace/outputs/<run>/` |
+
+## Agents
+
+Each agent is a fixed LangGraph pipeline, not a free-form tool-calling loop. With 7B local
+models, tool-calling loops are unreliable; giving each LLM call one narrow job (write search
+queries, write code, write prose) and letting code make the tool calls works much better.
+
+| Agent | Pipeline | Output |
+|---|---|---|
+| research | plan queries -> search + fetch pages (and local docs named in the task) -> synthesize | findings with `[n]` citations + source URLs |
+| analytics | find data -> profile it in the sandbox -> write code -> run -> fix on error (max 2) -> report | printed results + chart files |
+| writing | draft | markdown answer |
+| action | stub until phase 6 | |
+
+After the writer, code (not the model) has the last word on the answer:
+- image links to files no step produced are removed, and charts the writer forgot are appended
+- if any step failed, a notice saying so goes at the top, so made-up figures can't pass as real
+
+### What the first live runs taught us
+
+These came from running real goals on `qwen2.5:7b` / `qwen2.5:3b` on an 8 GB laptop:
+
+- **The model guessed column types** from raw CSV lines and wrote code that summed a date
+  column. Fix: a fixed profiling script runs first, so the model sees real dtypes.
+- **pandas 3 broke generated code** (the `"M"` month alias was removed); the model couldn't fix
+  it even with the error message. Fix: the sandbox pins pandas 2.x.
+- **The writer invented results for a failed step**, despite being told not to. Fix: failed
+  steps are described plainly, and the failure notice above is added by code.
+- **Speed:** the 7B model generated ~2–5 tokens/s (CPU/GPU split); a smaller context window
+  (6144 instead of 8192) was noticeably faster. A CSV analysis + report took ~2 min; a goal with
+  web research + analysis + report took ~14 min. Phase 10 measures this properly.

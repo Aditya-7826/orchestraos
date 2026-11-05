@@ -19,6 +19,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from orchestraos.agents.base import Agent, AgentState
 from orchestraos.graph import planner
+from orchestraos.graph.answer import failure_notice, reconcile_images, strip_outer_fence
 from orchestraos.graph.state import AGENT_NAMES, StepResult, SupervisorState
 from orchestraos.llm.router import ModelRouter
 from orchestraos.memory.base import Memory
@@ -33,9 +34,16 @@ def format_results(results: list[StepResult]) -> str:
     """Earlier steps' results as context for the next agent."""
     blocks = []
     for r in results:
-        status = "" if r["ok"] else " (FAILED)"
+        if not r["ok"]:
+            # Spell it out: small models otherwise "fill in" results for failed steps.
+            blocks.append(
+                f"### Step {r['step_id']} â€” {r['agent']} (FAILED)\n"
+                f"This step failed ({r['output'][:300]}). It produced no results; "
+                "do not report any numbers, findings or charts for it."
+            )
+            continue
         output = r["output"][:MAX_RESULT_CHARS]
-        block = f"### Step {r['step_id']} — {r['agent']}{status}\n{output}"
+        block = f"### Step {r['step_id']} â€” {r['agent']}\n{output}"
         if r["sources"]:
             block += "\nSources: " + ", ".join(r["sources"])
         if r["artifacts"]:
@@ -118,9 +126,19 @@ def build_supervisor(
         results = state.get("results", [])
         writing = [r for r in results if r["agent"] == "writing" and r["ok"]]
         answer = writing[-1]["output"] if writing else format_results(results)
+        artifacts = [a for r in results if r["ok"] for a in r["artifacts"]]
+        answer = reconcile_images(strip_outer_fence(answer), artifacts)
+        failed = [(r["step_id"], r["agent"], r["output"][:300]) for r in results if not r["ok"]]
+        if notice := failure_notice(failed):
+            answer = f"{notice}\n\n{answer}"
         # Every source any step used, de-duplicated, in first-seen order.
         sources = list(dict.fromkeys(s for r in results for s in r["sources"]))
-        return {"final_answer": answer, "sources": sources, "messages": [AIMessage(answer)]}
+        return {
+            "final_answer": answer,
+            "sources": sources,
+            "artifacts": artifacts,
+            "messages": [AIMessage(answer)],
+        }
 
     async def store_memory(state: SupervisorState) -> SupervisorState:
         await memory.remember(state["goal"], state["final_answer"])
