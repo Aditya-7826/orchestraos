@@ -1,0 +1,47 @@
+name: orchestraos
+
+# Profiles keep the stack runnable on an 8 GB laptop:
+#   docker compose up -d                       -> core only (api)
+#   docker compose --profile graph up -d       -> + Neo4j
+# Ollama runs on the host (not here) so the model's RAM isn't inside the Docker VM.
+
+services:
+  api:
+    build: .
+    env_file: .env
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      WORKSPACE_DIR: /app/workspace
+      DATA_DIR: /app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # needed on Linux; harmless elsewhere
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./workspace:/app/workspace
+      - ./data:/app/data
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  neo4j:
+    image: neo4j:5.26-community
+    profiles: ["graph"]
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}
+      # Small heap/page cache: our graph is tiny, the defaults are sized for servers.
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 128m
+    ports:
+      - "7474:7474"  # browser UI
+      - "7687:7687"  # bolt
+    volumes:
+      - neo4j-data:/data
+    mem_limit: 1g
+
+volumes:
+  neo4j-data:
