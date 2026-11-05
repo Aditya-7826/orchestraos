@@ -6,10 +6,10 @@ action), uses tools over MCP, asks for your approval before side effects, and an
 
 Everything runs locally: LLMs via [Ollama](https://ollama.com), no paid APIs, no cloud services.
 
-> **Status: Phase 8 of 10.** Chat UI -> streaming API -> supervisor -> research, analytics,
+> **Status: Phase 9 of 10.** Chat UI -> streaming API -> supervisor -> research, analytics,
 > writing and action agents work end to end on local models, with human approval before any
-> file is written, memory across sessions, and the research agent also served over A2A.
-> Tracing and evals come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the phase plan.
+> file is written, memory across sessions, the research agent also served over A2A, and every
+> step traced in self-hosted Langfuse. Evals come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the phase plan.
 
 ## How a run works
 
@@ -50,6 +50,7 @@ Docker VM. Heavier services are behind Compose profiles so you only run what you
 | `docker compose up -d` | `api` (FastAPI, MCP servers) + `ui` (Streamlit) |
 | `docker compose --profile graph up -d` | + Neo4j (capped at 1 GB) |
 | `docker compose --profile a2a up -d` | + the research agent as an A2A service on :8100 |
+| `make up-observability` | + Langfuse (6 containers, ~1.6 GB idle) for tracing |
 
 `make doctor` warns when the machine has less than 12 GB of RAM. On those machines, enable
 optional profiles one at a time.
@@ -66,6 +67,7 @@ src/orchestraos/
   graph/         # supervisor StateGraph, typed state, planner, checkpointer, answer clean-up
   agents/        # research (local or over A2A), analytics, writing, action; each a subgraph
   a2a/           # research agent as an A2A service (a2a-sdk): Agent Card + JSON-RPC
+  observability.py # Langfuse tracing (opt-in), sessions per thread
   memory/        # memory agent: ChromaDB (semantic) + Neo4j (graph), recall/remember subgraphs
   tools/         # tool logic: workspace files, web search/fetch, Docker sandbox, MCP client
   mcp_servers/   # FastMCP servers (stdio): search, filesystem, python_sandbox
@@ -139,6 +141,28 @@ After the writer, code (not the model) has the last word on the answer:
 - source URLs no tool returned are removed (with no research step, a 7B model still wrote `[1]`
   and invented a plausible URL)
 - if any step failed, a notice saying so goes at the top, so made-up figures can't pass as real
+
+### Tracing (Langfuse)
+
+Self-hosted Langfuse 4.75 runs in the `observability` profile: the official stack (web, worker,
+Postgres, ClickHouse, Redis, MinIO) minus the optional AI gateway, with telemetry off, only the
+UI published (localhost:3000), and memory caps. `make setup` generates every secret and the
+project's API keys, and Langfuse creates the project from them on first start (no sign-up step).
+
+```bash
+make up-observability          # then set TRACING=true in .env (off by default)
+uv run orchestraos run "Analyse sales.csv: total units per region"
+```
+
+One LangChain callback handler attached to the supervisor traces each run as one trace: every
+supervisor node, each agent subgraph and its nodes, every MCP tool call, and every LLM call with
+model, tokens and latency. A run's traces share a Langfuse session (its thread id), so a run
+paused for approval and resumed later stays together. The A2A research service traces too.
+
+Measured: a research + analytics run produced 48 observations (26 chain spans, 13 MCP tool
+calls, 6 LLM generations, 3 agents). On the first live run the end of the trace went missing:
+the SDK's 5 s export timeout was too short while a model saturated the laptop, so the final,
+largest batch was aborted mid-upload. The export timeout is now 30 s.
 
 ### Research over A2A
 

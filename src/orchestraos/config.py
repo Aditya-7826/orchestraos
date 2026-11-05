@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str | None = None
 
+    # --- Tracing (Langfuse, `observability` Compose profile). Opt-in with TRACING=true. ---
+    tracing: bool = False
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+    langfuse_base_url: str = "http://localhost:3000"
+
     # --- Python sandbox (analytics agent) ---
     sandbox_image: str = "orchestraos-sandbox:latest"
     sandbox_memory: str = "512m"

@@ -15,6 +15,7 @@ import uuid
 
 from orchestraos.config import get_settings
 from orchestraos.graph.factory import open_app
+from orchestraos.observability import session_metadata
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 async def run_goal(goal: str | None, thread_id: str, *, resume: bool) -> int:
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id}, "metadata": session_metadata(thread_id)}
     async with open_app(get_settings()) as app:
         if resume:
             snapshot = await app.aget_state(config)

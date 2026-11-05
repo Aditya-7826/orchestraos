@@ -1,6 +1,6 @@
 # OrchestraOS. Recipes avoid shell-specific syntax so they work from cmd, PowerShell and bash.
 
-.PHONY: help setup sandbox-image doctor dev ui a2a-research test lint up up-graph down logs ps
+.PHONY: help setup sandbox-image doctor dev ui a2a-research test lint up up-graph up-observability down logs ps
 
 help:
 	@echo "make setup     - install deps, create .env and workspace/ (safe to re-run)"
@@ -13,6 +13,7 @@ help:
 	@echo "make lint      - ruff lint + format check"
 	@echo "make up        - start api + ui in Docker (UI on http://localhost:8501)"
 	@echo "make up-graph  - core stack + Neo4j"
+	@echo "make up-observability - Langfuse tracing UI on http://localhost:3000"
 	@echo "make down      - stop everything"
 
 setup:
@@ -44,11 +45,15 @@ lint:
 up:
 	docker compose up -d --build
 
+up-observability:
+	docker compose --profile observability up -d langfuse-web langfuse-worker
+	@echo "Langfuse: http://localhost:3000 (login: LANGFUSE_UI_EMAIL / LANGFUSE_UI_PASSWORD in .env); set TRACING=true"
+
 up-graph:
 	docker compose --profile graph up -d --build
 
 down:
-	docker compose --profile graph down
+	docker compose --profile graph --profile a2a --profile observability down
 
 logs:
 	docker compose logs -f

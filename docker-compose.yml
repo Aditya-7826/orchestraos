@@ -3,6 +3,8 @@ name: orchestraos
 # Profiles keep the stack runnable on an 8 GB laptop:
 #   docker compose up -d                       -> core: api + ui
 #   docker compose --profile graph up -d       -> + Neo4j
+#   docker compose --profile a2a up -d         -> + research agent as an A2A service
+#   docker compose --profile observability up -d  -> + Langfuse (tracing UI on :3000)
 # Ollama runs on the host (not here) so the model's RAM isn't inside the Docker VM.
 
 services:
@@ -21,6 +23,7 @@ services:
       NEO4J_URI: ${NEO4J_URI:+bolt://neo4j:7687}
       # With RESEARCH_MODE=a2a (and `--profile a2a`), research runs in the `research` service.
       A2A_RESEARCH_URL: http://research:8100/
+      LANGFUSE_BASE_URL: http://langfuse-web:3000  # used only with TRACING=true
     extra_hosts:
       - "host.docker.internal:host-gateway"  # needed on Linux; harmless elsewhere
     ports:
@@ -92,5 +95,139 @@ services:
       timeout: 5s
       retries: 30
 
+  # --- Langfuse (self-hosted tracing), profile `observability` --------------------------
+  # Adapted from Langfuse's official docker-compose.yml: same six services, minus the
+  # optional AI gateway; telemetry off; only the web UI is published, on localhost; memory
+  # caps so it fits next to a 3B model on an 8 GB laptop. `make setup` generates the secrets
+  # and the project keys (LANGFUSE_INIT_*), so there's no manual sign-up step.
+  langfuse-web:
+    image: docker.langfuse.com/langfuse/langfuse:${LANGFUSE_IMAGE_TAG:-4.75.0}
+    profiles: ["observability"]
+    depends_on: &langfuse-deps
+      langfuse-postgres: {condition: service_healthy}
+      langfuse-clickhouse: {condition: service_healthy}
+      langfuse-redis: {condition: service_healthy}
+      langfuse-minio: {condition: service_healthy}
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment: &langfuse-env
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?run `make setup`}
+      SALT: ${LANGFUSE_SALT:?run `make setup`}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?run `make setup`}
+      TELEMETRY_ENABLED: "false"
+      DATABASE_URL: postgresql://postgres:${LANGFUSE_DB_PASSWORD:?run `make setup`}@langfuse-postgres:5432/postgres
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_DB_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: "6379"
+      REDIS_AUTH: ${LANGFUSE_DB_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_DB_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_DB_PASSWORD}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      # Headless setup: org, project, API keys and a UI login, created on first start.
+      LANGFUSE_INIT_ORG_ID: orchestraos
+      LANGFUSE_INIT_ORG_NAME: OrchestraOS
+      LANGFUSE_INIT_PROJECT_ID: orchestraos
+      LANGFUSE_INIT_PROJECT_NAME: OrchestraOS
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?run `make setup`}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?run `make setup`}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_UI_EMAIL:-admin@orchestraos.local}
+      LANGFUSE_INIT_USER_NAME: admin
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_UI_PASSWORD:?run `make setup`}
+    mem_limit: 1g  # measured ~670 MB idle
+
+  langfuse-worker:
+    image: docker.langfuse.com/langfuse/langfuse-worker:${LANGFUSE_IMAGE_TAG:-4.75.0}
+    profiles: ["observability"]
+    depends_on: *langfuse-deps
+    environment: *langfuse-env
+    mem_limit: 768m
+
+  langfuse-postgres:
+    image: docker.io/postgres:17
+    profiles: ["observability"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD}
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    mem_limit: 256m
+
+  langfuse-clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:26.3.62.3
+    profiles: ["observability"]
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_DB_PASSWORD}
+    volumes:
+      - langfuse-clickhouse:/var/lib/clickhouse
+      - langfuse-clickhouse-logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 1g
+
+  langfuse-redis:
+    image: docker.io/redis:7
+    profiles: ["observability"]
+    command: --requirepass ${LANGFUSE_DB_PASSWORD} --maxmemory-policy noeviction
+    volumes:
+      - langfuse-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${LANGFUSE_DB_PASSWORD}", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    mem_limit: 128m
+
+  langfuse-minio:
+    image: cgr.dev/chainguard/minio
+    profiles: ["observability"]
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_DB_PASSWORD}
+    volumes:
+      - langfuse-minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+    mem_limit: 256m
+
 volumes:
   neo4j-data:
+  langfuse-postgres:
+  langfuse-clickhouse:
+  langfuse-clickhouse-logs:
+  langfuse-redis:
+  langfuse-minio:

@@ -19,6 +19,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
 from orchestraos.api.events import Event, to_events
+from orchestraos.observability import session_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class RunManager:
 
     @staticmethod
     def config(thread_id: str) -> dict:
-        return {"configurable": {"thread_id": thread_id}}
+        return {"configurable": {"thread_id": thread_id}, "metadata": session_metadata(thread_id)}
 
     def start(self, goal: str) -> Run:
         run = Run(thread_id=uuid.uuid4().hex[:12])

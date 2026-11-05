@@ -20,6 +20,7 @@ from orchestraos.memory.agent import MemoryAgent
 from orchestraos.memory.base import Memory, NullMemory
 from orchestraos.memory.graph import GraphStore, Neo4jGraph, NullGraph
 from orchestraos.memory.vector import OllamaEmbedder, VectorMemory
+from orchestraos.observability import flush, traced
 from orchestraos.tools.client import ToolCaller, open_toolset, restrict
 
 logger = logging.getLogger(__name__)
@@ -79,9 +80,13 @@ async def open_app(settings: Settings) -> AsyncIterator[CompiledStateGraph]:
         open_checkpointer(settings.checkpoint_db) as checkpointer,
         open_memory(settings, router) as memory,
     ):
-        yield build_supervisor(
+        graph = build_supervisor(
             router=router,
             agents=build_agents(router, toolset, settings),
             memory=memory,
             checkpointer=checkpointer,
         )
+        try:
+            yield traced(graph, settings)
+        finally:
+            flush(settings)

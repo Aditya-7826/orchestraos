@@ -123,13 +123,17 @@ async def open_real_agent() -> AsyncIterator[Agent]:
     from orchestraos.agents.research import build_research_agent
     from orchestraos.config import get_settings
     from orchestraos.llm.router import ModelRouter
+    from orchestraos.observability import flush, traced
     from orchestraos.tools.client import open_toolset, restrict
 
     settings = get_settings()
     router = ModelRouter.from_settings(settings)
     async with open_toolset(settings, servers=["search", "filesystem"]) as toolset:
         tools = restrict(toolset, "web_search", "fetch_page", "list_files", "read_file")
-        yield build_research_agent(router, tools)
+        try:
+            yield traced(build_research_agent(router, tools), settings)
+        finally:
+            flush(settings)
 
 
 app = create_app()
