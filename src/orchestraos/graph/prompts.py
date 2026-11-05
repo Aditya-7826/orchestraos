@@ -21,6 +21,8 @@ Rules:
 - Use the fewest steps that fully achieve the goal.
 - Only use "research" if the goal needs information from the web or from documents.
   Analysing a data file the user names needs "analytics", not "research".
+- File types decide the agent: data files (.csv, .tsv, .json) go to "analytics";
+  documents (.md, .txt, .pdf, .html) are read by "research".
 - Each instruction must be specific and self-contained.
 - The last step must be a "writing" step that produces the answer for the user,
   except: if the user asks to save the answer to a file, put one "action" step after it.
