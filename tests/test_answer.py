@@ -97,3 +97,10 @@ def test_local_file_sources_dont_count_as_web_citations():
 def test_markdown_links_to_known_urls_survive():
     answer = "See [the docs](https://real.example/a)."
     assert drop_unbacked_sources(answer, ["https://real.example/a"]) == answer
+
+
+def test_non_image_files_become_plain_links():
+    answer = "Here:\n\n![Filtered Employees](outputs/x/filtered.csv)"
+    assert reconcile_images(answer, ["outputs/x/filtered.csv"]) == (
+        "Here:\n\n[Filtered Employees](outputs/x/filtered.csv)"
+    )

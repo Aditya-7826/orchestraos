@@ -170,3 +170,19 @@ async def test_neo4j_round_trip():
             "MATCH (o:Entity {name: 'test-fact-zebra'}) DETACH DELETE o"
         )
         await graph.close()
+
+
+async def test_user_preferences_apply_to_unrelated_goals_without_the_graph(vector):
+    """Regression from the benchmark (m-preference): semantic search alone missed this."""
+    facts = [{"subject": "user", "relation": "prefers", "object": "short bullet points"}]
+    memory = MemoryAgent(fake_router(fact_llm(facts)), vector, NullGraph())
+    await memory.remember("I prefer answers as short bullet points. What is Docker?", "...")
+    context = await memory.recall("What is Kubernetes?")
+    assert "user prefers short bullet points" in context
+
+
+async def test_facts_about_others_still_need_to_be_relevant(vector):
+    facts = [{"subject": "user's app", "relation": "uses", "object": "fastapi"}]
+    memory = MemoryAgent(fake_router(fact_llm(facts)), vector, NullGraph())
+    await memory.remember("our app uses FastAPI", "...")
+    assert "fastapi" not in await memory.recall("bake sourdough bread at home")

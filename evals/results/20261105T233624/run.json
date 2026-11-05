@@ -1,0 +1,9 @@
+{
+  "started": "2026-11-05T23:36:24",
+  "small_model": "qwen2.5:3b",
+  "large_model": "qwen2.5:7b",
+  "embed_model": "nomic-embed-text",
+  "machine": "Windows 11, 7.3 GB RAM, 12 CPUs",
+  "commit": "c9dbf41",
+  "wall_minutes": 50
+}

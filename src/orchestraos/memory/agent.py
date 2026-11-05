@@ -73,7 +73,7 @@ def compose_context(facts: list[str], episodes: list[MemoryHit]) -> str:
     if facts:
         parts.append("Known about the user:\n" + "\n".join(f"- {f}" for f in facts))
     if episodes:
-        lines = [f"- ({e.created}) {e.text}" for e in episodes]
+        lines = [f"- ({e.created[:10]}) {e.text}" for e in episodes]  # date only
         parts.append("Related past work:\n" + "\n".join(lines))
     return "\n\n".join(parts)
 
@@ -103,12 +103,16 @@ class MemoryAgent:
 
     def _build_recall(self):
         async def search(state: RecallState) -> RecallState:
-            episodes, fact_hits, graph_facts = await asyncio.gather(
+            episodes, user_facts, fact_hits, graph_facts = await asyncio.gather(
                 self.vector.search(state["goal"], kind="episode", k=MAX_EPISODES),
+                # The user's own facts (preferences, their projects) apply to every goal,
+                # however unrelated: found by the benchmark ("I prefer bullet points", then
+                # "What is Kubernetes?" recalled nothing with similarity search alone).
+                self.vector.facts_about("user", limit=MAX_FACTS),
                 self.vector.search(state["goal"], kind="fact", k=MAX_FACTS),
                 self.graph.related(state["goal"], limit=MAX_FACTS),
             )
-            facts = [f.text() for f in graph_facts]
+            facts = [*user_facts, *(f.text() for f in graph_facts)]
             facts += [h.text for h in fact_hits if h.distance <= FACT_MAX_DISTANCE]
             return {
                 "episodes": [e for e in episodes if e.distance <= EPISODE_MAX_DISTANCE],
@@ -138,13 +142,20 @@ class MemoryAgent:
             return {"facts": result.parsed.facts}
 
         async def store(state: RememberState) -> RememberState:
-            today = datetime.now(UTC).date().isoformat()
+            now = datetime.now(UTC).isoformat(timespec="seconds")
             episode = f"Goal: {state['goal']}\nAnswer: {state['answer'][:EPISODE_ANSWER_CHARS]}"
-            fact_texts = [f.text() for f in state["facts"]]
+            facts = state["facts"]
+            fact_texts = [f.text() for f in facts]
             await asyncio.gather(
-                self.vector.add([doc_id("episode", episode)], [episode], "episode", today),
-                self.vector.add([doc_id("fact", t) for t in fact_texts], fact_texts, "fact", today),
-                self.graph.add_facts(state["facts"]),
+                self.vector.add([doc_id("episode", episode)], [episode], "episode", now),
+                self.vector.add(
+                    [doc_id("fact", t) for t in fact_texts],
+                    fact_texts,
+                    "fact",
+                    now,
+                    subjects=[f.subject for f in facts],
+                ),
+                self.graph.add_facts(facts),
             )
             return {}
 

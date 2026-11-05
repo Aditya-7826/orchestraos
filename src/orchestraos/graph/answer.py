@@ -70,10 +70,13 @@ def reconcile_images(answer: str, artifacts: list[str]) -> str:
 
     def keep_or_drop(match: re.Match) -> str:
         path = match.group(2).removeprefix("./").removeprefix("workspace/")
-        if path in real:
-            embedded.add(path)
-            return f"![{match.group(1)}]({path})"
-        return ""  # drop links to files no step produced
+        if path not in real:
+            return ""  # drop links to files no step produced
+        if not path.lower().endswith(IMAGE_SUFFIXES):
+            # A real file that isn't an image (e.g. a CSV the analysis saved): a plain link.
+            return f"[{match.group(1) or path.rsplit('/', 1)[-1]}]({path})"
+        embedded.add(path)
+        return f"![{match.group(1)}]({path})"
 
     cleaned = _IMAGE.sub(keep_or_drop, answer)
     missing = [a for a in artifacts if a.lower().endswith(IMAGE_SUFFIXES) and a not in embedded]

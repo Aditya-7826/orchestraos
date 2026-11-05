@@ -59,17 +59,45 @@ class VectorMemory:
         )
         self._embedder = embedder
 
-    async def add(self, ids: list[str], texts: list[str], kind: Kind, created: str) -> None:
+    async def add(
+        self,
+        ids: list[str],
+        texts: list[str],
+        kind: Kind,
+        created: str,
+        subjects: list[str] | None = None,
+    ) -> None:
         if not texts:
             return
         embeddings = await self._embedder.embed_documents(texts)
+        subjects = subjects or [""] * len(texts)
         await asyncio.to_thread(
             self._collection.upsert,  # upsert: storing the same fact twice keeps one copy
             ids=ids,
             documents=texts,
             embeddings=embeddings,
-            metadatas=[{"kind": kind, "created": created} for _ in texts],
+            metadatas=[
+                {"kind": kind, "created": created, "subject": subject} for subject in subjects
+            ],
         )
+
+    async def facts_about(self, subject: str, limit: int = 8) -> list[str]:
+        """Facts with this subject, newest first, regardless of what's being asked.
+
+        Preferences like "user prefers bullet points" apply to every question, but are
+        never semantically close to one ("What is Kubernetes?"), so search alone misses them.
+        """
+        result = await asyncio.to_thread(
+            self._collection.get,
+            where={"$and": [{"kind": "fact"}, {"subject": subject}]},
+            include=["documents", "metadatas"],
+        )
+        pairs = sorted(
+            zip(result["documents"], result["metadatas"], strict=True),
+            key=lambda pair: pair[1]["created"],
+            reverse=True,
+        )
+        return [doc for doc, _ in pairs[:limit]]
 
     async def search(self, query: str, kind: Kind, k: int = 5) -> list[MemoryHit]:
         count = await asyncio.to_thread(self._collection.count)
