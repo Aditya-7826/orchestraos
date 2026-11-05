@@ -1,4 +1,5 @@
 from orchestraos.graph.answer import (
+    drop_save_instructions,
     drop_unbacked_sources,
     failure_notice,
     reconcile_images,
@@ -104,3 +105,25 @@ def test_non_image_files_become_plain_links():
     assert reconcile_images(answer, ["outputs/x/filtered.csv"]) == (
         "Here:\n\n[Filtered Employees](outputs/x/filtered.csv)"
     )
+
+
+def test_writer_talk_about_saving_is_removed():
+    """Seen live in the demo: this line ended up inside the saved file."""
+    text = "# Checklist\n\n1. Read the PR\n\nSave the above content to `notes/demo-checklist.md`."
+    assert (
+        drop_save_instructions(text, ["notes/demo-checklist.md"]) == "# Checklist\n\n1. Read the PR"
+    )
+
+
+def test_other_lines_mentioning_saving_are_kept():
+    text = "Save time by writing small PRs.\nThe notes/demo-checklist.md file lists them."
+    assert drop_save_instructions(text, ["notes/demo-checklist.md"]) == text
+
+
+def test_no_target_path_means_no_change():
+    assert drop_save_instructions("Save it somewhere.", []) == "Save it somewhere."
+
+
+def test_never_empties_the_content():
+    only_line = "Write it and save to notes/review.md"
+    assert drop_save_instructions(only_line, ["notes/review.md"]) == only_line

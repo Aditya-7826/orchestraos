@@ -14,6 +14,29 @@ _CITATION = re.compile(r"\s?\[\d+\](?!\()")  # [1] but not a markdown link [1](.
 _SOURCES_HEADING = re.compile(r"^\s*(?:#+\s*)?\**sources\**:?\**\s*(?:none)?\s*$", re.I)
 
 
+_SAVE_VERB = re.compile(r"\b(save|saved|saving|write|written|store|stored)\b", re.I)
+
+
+def drop_save_instructions(text: str, paths: list[str]) -> str:
+    """Remove lines where the writer talks about saving to the target file.
+
+    Told not to, the 7B writer still ended a checklist with "Save the above content to
+    `notes/demo-checklist.md`." That line then ended up inside the saved file itself. Saving
+    is the action agent's job, and it reports what it did separately.
+    """
+    names = {p for p in paths if p} | {p.rsplit("/", 1)[-1] for p in paths if p}
+    if not names:
+        return text
+    kept = [
+        line
+        for line in text.splitlines()
+        if not (_SAVE_VERB.search(line) and any(name in line for name in names))
+    ]
+    cleaned = "\n".join(kept).strip()
+    # Never empty the text: if every line mentioned the file, it *is* the content.
+    return cleaned or text
+
+
 def drop_unbacked_sources(answer: str, sources: list[str]) -> str:
     """Remove source URLs no step produced, and all citations if nothing was researched.
 

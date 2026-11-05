@@ -101,6 +101,7 @@ ollama pull qwen2.5:7b          # large model: planning, code, writing
 ollama pull nomic-embed-text    # embeddings for memory
 make sandbox-image              # the no-network Python sandbox image (one-off)
 make doctor                     # checks Ollama, models, Docker, sandbox image, RAM
+make demo                       # guided step-by-step tour (see the walkthrough below)
 make up                         # api + ui in Docker
 # open http://localhost:8501 and try: "Analyse sales.csv: revenue per region with a chart"
 ```
@@ -108,6 +109,112 @@ make up                         # api + ui in Docker
 Or without Docker for the app itself: `make dev` (API on :8000) and `make ui` (UI on :8501).
 A terminal run is `uv run orchestraos run "<goal>"`. If you don't have `make`, each target is
 a single command; see the [Makefile](Makefile).
+
+## Step-by-step walkthrough
+
+### 1. Take the guided tour (about 10 minutes)
+
+```bash
+make demo          # or: uv run orchestraos demo   (add --yes to skip the pauses)
+```
+
+The tour runs five real goals through the whole system. Before each one it explains what is
+about to happen, and afterwards it tells you what to look for. It keeps its own memory in
+`data/demo/`, so it doesn't change yours. Here is what each step does, with excerpts from a real
+run on an 8 GB laptop:
+
+**Step 1: check the setup.** These are the same checks as `make doctor`. If something is
+missing, the tour stops and prints the fix (for example `ollama pull qwen2.5:7b`).
+
+**Step 2: ask a simple question.** The small model decides no tools are needed, so the large
+model answers in a single writing step:
+
+```
+> "In two sentences, what does a multi-agent AI system do?"
+  triage (small model): direct answer
+  plan (large model):
+    1. writing: In two sentences, what does a multi-agent AI system do?
+```
+
+**Step 3: analyse a data file.** The analytics agent profiles `sales.csv`, writes
+pandas/matplotlib code and runs it in the no-network Docker sandbox:
+
+```
+> "Analyse sales.csv: total revenue per region, with a bar chart"
+  triage (small model): needs a plan
+  plan (large model):
+    1. analytics: Load 'sales.csv', calculate total revenue per region, generate a bar chart.
+    2. writing: Present the total revenue per region and the bar chart in markdown.
+  step 1 analytics: ok - ... region North 106080 South 79920 ...
+  Answer:
+    | Region | Total Revenue |
+    | North  | 106,080       |
+    | South  | 79,920        |
+  File: ...\workspace\outputs\6df147bd40\revenue_by_region.png
+```
+
+**Step 4: approve a side effect.** Saving a file pauses the run until you answer:
+
+```
+> "Write a 3-item checklist for reviewing a pull request and save it to notes/demo-checklist.md"
+  plan (large model):
+    1. writing: Write a 3-item checklist for reviewing a pull request ...
+    2. action: Save the answer from the previous step to notes/demo-checklist.md
+  The run is paused. It wants to make these changes:
+    write_file -> notes/demo-checklist.md, 579 chars
+      | # Checklist for Reviewing Pull Requests
+      | ...
+  Approve? [y/N] y
+  step 2 action: ok - Saved to notes/demo-checklist.md (approved by you).
+```
+
+Answer `n` and nothing is written: the answer says "Not saved".
+
+**Step 5: memory across sessions.** You state a preference, then ask something unrelated in a
+new session:
+
+```
+> "I prefer answers as short bullet points. What is Docker?"
+> "What is Kubernetes?"
+  Recalled from memory:
+    Known about the user:
+    - user prefers answers as short bullet points
+  Answer:
+    - Kubernetes is an open-source container orchestration tool.
+    - It automates the deployment, scaling, and management of containerized applications.
+    ...
+```
+
+### 2. Use the chat UI
+
+1. Start the app: `make up` (Docker), or `make dev` and `make ui` in two terminals.
+2. Open http://localhost:8501. The sidebar shows whether the models are ready.
+3. Add a file: drag a CSV, PDF or text file onto **Add a file** in the sidebar. It goes into
+   `workspace/`. `sales.csv` and `employees.csv` are there already.
+4. Type a goal in the chat box, for example *"Analyse employees.csv: average salary per
+   department, with a chart"*.
+5. Watch it work. The status box shows the plan and each finished step, and the answer streams
+   in as the writer produces it. Charts appear inline.
+6. Approve or reject. If the goal asks to save something (*"... and save it to
+   reports/salaries.md"*), the run stops and shows each proposed file with a preview. Click
+   **Approve** or **Reject**, adding a note if you like.
+7. Check the sources. Expand **Sources** under the answer to see the URLs and files used, and
+   **How I did it** to see the plan and each step's result.
+8. Come back later. Tell it a preference once (*"I prefer short bullet points"*) and later
+   answers follow it.
+
+### 3. Use it from the terminal or the API
+
+```bash
+uv run orchestraos run "Research what LangGraph checkpointers are used for"
+uv run orchestraos run --thread <id>         # resume a run that stopped part-way
+
+curl -X POST localhost:8000/runs -H 'content-type: application/json' \
+     -d '{"goal": "Analyse sales.csv: total units per region"}'      # -> {"thread_id": "..."}
+curl -N localhost:8000/runs/<thread_id>/events                       # live progress (SSE)
+curl -X POST localhost:8000/runs/<thread_id>/approval \
+     -H 'content-type: application/json' -d '{"approved": true}'     # answer an approval
+```
 
 ### Running on 8 GB of RAM
 
@@ -283,6 +390,7 @@ uv run python -m evals.run     # the benchmark (see Results)
 ```
 src/orchestraos/
   config.py        settings from .env
+  demo.py          `orchestraos demo`: the guided step-by-step tour
   llm/router.py    small vs large model per step, retry, fall back
   graph/           supervisor graph, state, planner, checkpointer, answer checks
   agents/          research (local or A2A), analytics, writing, action

@@ -1,11 +1,12 @@
 # OrchestraOS. Recipes avoid shell-specific syntax so they work from cmd, PowerShell and bash.
 
-.PHONY: help setup sandbox-image doctor dev ui a2a-research test lint up up-graph up-observability down logs ps
+.PHONY: help setup sandbox-image doctor demo dev ui a2a-research test lint up up-graph up-observability down logs ps
 
 help:
 	@echo "make setup     - install deps, create .env and workspace/ (safe to re-run)"
 	@echo "make sandbox-image - build the no-network image analytics code runs in"
 	@echo "make doctor    - check Ollama, models, Docker, sandbox image and RAM"
+	@echo "make demo      - guided step-by-step tour of the system (about 10 min)"
 	@echo "make dev       - run the API locally with reload on http://localhost:8000"
 	@echo "make ui        - run the Streamlit UI locally on http://localhost:8501"
 	@echo "make a2a-research - run the research agent as an A2A service on :8100"
@@ -25,6 +26,9 @@ sandbox-image:
 
 doctor:
 	uv run orchestraos-doctor
+
+demo:
+	uv run orchestraos demo
 
 dev:
 	uv run uvicorn orchestraos.api.main:app --reload

@@ -2,6 +2,7 @@
 
     uv run orchestraos run "Explain what a vector database is"
     uv run orchestraos run --thread ab12cd34     # resume a run that stopped part-way
+    uv run orchestraos demo                      # guided step-by-step tour
 
 One thread = one run: a thread's checkpoints hold that run's plan and results,
 so a new goal always gets a new thread.
@@ -25,7 +26,16 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("goal", nargs="?", help="omit with --thread to resume that run")
     run.add_argument("--thread", help="resume this thread id instead of starting a new run")
     run.add_argument("-v", "--verbose", action="store_true")
+    demo = sub.add_parser("demo", help="guided step-by-step tour of the system")
+    demo.add_argument("--yes", action="store_true", help="no pauses; approve automatically")
+    demo.add_argument("--step", type=int, nargs="*", help="run only these steps (1-5)")
     args = parser.parse_args(argv)
+
+    if args.command == "demo":
+        from orchestraos.demo import Console, run_demo
+
+        logging.basicConfig(level=logging.ERROR)
+        return asyncio.run(run_demo(get_settings(), Console(auto=args.yes), only=args.step))
 
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING)
     if bool(args.goal) == bool(args.thread):

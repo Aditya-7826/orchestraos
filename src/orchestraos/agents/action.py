@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, model_validator
 from orchestraos.agents.base import Agent, AgentState
 from orchestraos.agents.common import AgentError
 from orchestraos.agents.prompts import ACTION_SYSTEM
-from orchestraos.graph.answer import strip_outer_fence
+from orchestraos.graph.answer import drop_save_instructions, strip_outer_fence
 from orchestraos.llm.router import ModelRouter, ModelRouterError, TaskKind
 from orchestraos.tools.client import ToolCaller
 
@@ -83,6 +83,7 @@ def resolve_writes(proposal: Proposal, results: list[dict], existing: set[str]) 
         else:
             content = action.content
         path = action.path.strip().lstrip("/").replace("\\", "/")
+        content = drop_save_instructions(content, [path])  # no "save this to <path>" in the file
         writes.append({"path": path, "content": content, "overwrite": path in existing})
     return writes
 

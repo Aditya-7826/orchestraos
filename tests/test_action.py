@@ -211,3 +211,12 @@ def test_existing_action_step_is_left_alone():
     steps = [{"id": 1, "agent": "writing", "instruction": "w"},
              {"id": 2, "agent": "action", "instruction": "save"}]  # fmt: skip
     assert ensure_save_step(steps, "save it to a.md") == steps
+
+
+def test_saved_file_has_no_save_instructions():
+    output = "# R\n\n- point\n\nSave the above content to `reports/r.md`."
+    results = [{"step_id": 1, "agent": "writing", "ok": True, "output": output,
+                "sources": [], "artifacts": []}]  # fmt: skip
+    proposal = Proposal(actions=[ProposedWrite(path="reports/r.md", from_step=1)])
+    (write,) = resolve_writes(proposal, results, existing=set())
+    assert write["content"] == "# R\n\n- point"

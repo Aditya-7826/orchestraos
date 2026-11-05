@@ -21,6 +21,7 @@ from langgraph.graph.state import CompiledStateGraph
 from orchestraos.agents.base import Agent, AgentState
 from orchestraos.graph import planner
 from orchestraos.graph.answer import (
+    drop_save_instructions,
     drop_unbacked_sources,
     failure_notice,
     reconcile_images,
@@ -151,6 +152,9 @@ def build_supervisor(
 
         answer = reconcile_images(strip_outer_fence(answer), artifacts)
         answer = drop_unbacked_sources(answer, sources)
+        # The writer talking about saving ("Save this to notes/x.md") is noise: the action
+        # agent's own report below says what was actually saved.
+        answer = drop_save_instructions(answer, [planner.requested_file(state["goal"]) or ""])
         failed = [(r["step_id"], r["agent"], r["output"][:300]) for r in results if not r["ok"]]
         if notice := failure_notice(failed):
             answer = f"{notice}\n\n{answer}"
