@@ -11,13 +11,16 @@ IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".svg", ".gif")
 _IMAGE = re.compile(r"!\[([^\]]*)\]\(\s*<?([^)>\s]+)>?\s*\)")
 
 
-_OUTER_FENCE = re.compile(r"^```(?:markdown|md)?\s*\n(.*)\n```\s*$", re.DOTALL)
+_OUTER_FENCE = re.compile(r"^```\s*\n(.*)\n```\s*$", re.DOTALL)
+_MARKDOWN_FENCE = re.compile(r"```(?:markdown|md)[ \t]*\n(.*?)\n```", re.DOTALL)
 
 
 def strip_outer_fence(answer: str) -> str:
-    """Unwrap an answer the model put entirely inside a ```markdown code block."""
+    """Unwrap markdown the model put inside a code block, so it renders instead of showing
+    as code: any ```markdown block, or a plain ``` block that wraps the whole answer."""
+    answer = _MARKDOWN_FENCE.sub(lambda m: m.group(1), answer)
     match = _OUTER_FENCE.match(answer.strip())
-    return match.group(1).strip() if match else answer
+    return match.group(1).strip() if match else answer.strip()
 
 
 def reconcile_images(answer: str, artifacts: list[str]) -> str:

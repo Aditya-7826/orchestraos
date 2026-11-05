@@ -1,18 +1,22 @@
 name: orchestraos
 
 # Profiles keep the stack runnable on an 8 GB laptop:
-#   docker compose up -d                       -> core only (api)
+#   docker compose up -d                       -> core: api + ui
 #   docker compose --profile graph up -d       -> + Neo4j
 # Ollama runs on the host (not here) so the model's RAM isn't inside the Docker VM.
 
 services:
   api:
     build: .
+    image: orchestraos-app:latest
     env_file: .env
     environment:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       WORKSPACE_DIR: /app/workspace
       DATA_DIR: /app/data
+      # The sandbox containers are started by the *host's* Docker daemon, which needs the
+      # workspace's host path for bind mounts. `make setup` writes HOST_WORKSPACE to .env.
+      SANDBOX_HOST_WORKSPACE: ${HOST_WORKSPACE:?run `make setup` (sets HOST_WORKSPACE in .env)}
     extra_hosts:
       - "host.docker.internal:host-gateway"  # needed on Linux; harmless elsewhere
     ports:
@@ -20,12 +24,30 @@ services:
     volumes:
       - ./workspace:/app/workspace
       - ./data:/app/data
-    mem_limit: 512m
+      # Lets the python_sandbox MCP server start sandbox containers on the host daemon.
+      # Trade-off: this gives the api container control of Docker. Fine for a local,
+      # single-user app; for anything shared, run the sandbox behind a separate service.
+      - /var/run/docker.sock:/var/run/docker.sock
+    mem_limit: 1g
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  ui:
+    image: orchestraos-app:latest
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      ORCHESTRA_API: http://api:8000
+    command: ["streamlit", "run", "ui/app.py", "--server.address=0.0.0.0",
+              "--server.port=8501", "--server.headless=true",
+              "--browser.gatherUsageStats=false"]
+    ports:
+      - "${UI_PORT:-8501}:8501"
+    mem_limit: 512m
 
   neo4j:
     image: neo4j:5.26-community

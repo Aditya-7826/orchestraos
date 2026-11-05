@@ -60,6 +60,10 @@ class DockerSandbox:
         run_id = uuid.uuid4().hex[:10]
         output_dir = self.workspace.resolve() / "outputs" / run_id
         output_dir.mkdir(parents=True)
+        # The sandbox runs as an unprivileged user (uid 1000) but this folder may be created
+        # by root (e.g. when the API itself runs in a container), so open it up. It's a
+        # fresh, per-run folder that only this one sandbox container mounts.
+        output_dir.chmod(0o777)
 
         try:
             proc = self.run(

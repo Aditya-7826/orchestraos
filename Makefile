@@ -1,21 +1,22 @@
 # OrchestraOS. Recipes avoid shell-specific syntax so they work from cmd, PowerShell and bash.
 
-.PHONY: help setup sandbox-image doctor dev test lint up up-graph down logs ps
+.PHONY: help setup sandbox-image doctor dev ui test lint up up-graph down logs ps
 
 help:
-	@echo "make setup     - install deps (uv) and create .env from .env.example"
+	@echo "make setup     - install deps, create .env and workspace/ (safe to re-run)"
 	@echo "make sandbox-image - build the no-network image analytics code runs in"
 	@echo "make doctor    - check Ollama, models, Docker, sandbox image and RAM"
 	@echo "make dev       - run the API locally with reload on http://localhost:8000"
+	@echo "make ui        - run the Streamlit UI locally on http://localhost:8501"
 	@echo "make test      - run the test suite"
 	@echo "make lint      - ruff lint + format check"
-	@echo "make up        - start the core stack (docker compose)"
+	@echo "make up        - start api + ui in Docker (UI on http://localhost:8501)"
 	@echo "make up-graph  - core stack + Neo4j"
 	@echo "make down      - stop everything"
 
 setup:
 	uv sync
-	uv run python -c "import shutil, pathlib; p = pathlib.Path('.env'); p.exists() or shutil.copy('.env.example', p)"
+	uv run python scripts/setup_env.py
 
 sandbox-image:
 	docker build -t orchestraos-sandbox:latest sandbox
@@ -25,6 +26,9 @@ doctor:
 
 dev:
 	uv run uvicorn orchestraos.api.main:app --reload
+
+ui:
+	uv run streamlit run ui/app.py
 
 test:
 	uv run pytest

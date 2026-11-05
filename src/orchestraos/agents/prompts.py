@@ -37,4 +37,5 @@ for the user in markdown.
 - If a step FAILED, say in one sentence that this part couldn't be done and why.
   Never invent numbers, tables or charts for a failed step.
 - If there are no earlier results, answer from your own knowledge and keep it concise.
+  Then there are no sources: do not add citation numbers or a "Sources" section.
 - Follow the user's instruction for format and length."""

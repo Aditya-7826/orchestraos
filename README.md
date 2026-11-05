@@ -6,9 +6,9 @@ action), uses tools over MCP, asks for your approval before side effects, and an
 
 Everything runs locally: LLMs via [Ollama](https://ollama.com), no paid APIs, no cloud services.
 
-> **Status: Phase 4 of 10.** The supervisor, MCP tool servers and the research, analytics and
-> writing agents work end to end on local models. UI, approvals, memory, A2A, tracing and
-> evals come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the phase plan.
+> **Status: Phase 5 of 10.** Chat UI -> streaming API -> supervisor -> research, analytics and
+> writing agents work end to end on local models, in Docker or on the host. Approvals, memory,
+> A2A, tracing and evals come next. See [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) for the phase plan.
 
 ## How a run works
 
@@ -27,14 +27,14 @@ where it left off: `uv run orchestraos run --thread <id>`.
 Prerequisites (all free): Python 3.12, [uv](https://docs.astral.sh/uv/), Docker, Ollama.
 
 ```bash
-make setup                      # uv sync + create .env from .env.example
+make setup                      # uv sync, create .env and workspace/ (with sample data)
 ollama pull qwen2.5:3b          # small model: routing
 ollama pull qwen2.5:7b          # large model: planning / writing
 ollama pull nomic-embed-text    # embeddings
 make sandbox-image              # build the Python sandbox image (one-off)
 make doctor                     # checks Ollama, models, Docker, sandbox image, RAM
-make up                         # core stack
-curl http://localhost:8000/health
+make up                         # api + ui in Docker
+# open http://localhost:8501 and try: "Analyse sales.csv: revenue per region with a chart"
 ```
 
 No `make`? Every target is a single command; see the [Makefile](Makefile).
@@ -46,7 +46,7 @@ Docker VM. Heavier services are behind Compose profiles so you only run what you
 
 | Command | Services |
 |---|---|
-| `docker compose up -d` | `api` |
+| `docker compose up -d` | `api` (FastAPI, MCP servers) + `ui` (Streamlit) |
 | `docker compose --profile graph up -d` | + Neo4j (capped at 1 GB) |
 
 `make doctor` warns when the machine has less than 12 GB of RAM. On those machines, enable
@@ -66,7 +66,9 @@ src/orchestraos/
   memory/        # memory interface
   tools/         # tool logic: workspace files, web search/fetch, Docker sandbox, MCP client
   mcp_servers/   # FastMCP servers (stdio): search, filesystem, python_sandbox
-  api/main.py    # FastAPI app: GET /health
+  api/           # FastAPI: runs as background tasks, SSE events, workspace files
+ui/app.py        # Streamlit chat UI (talks to the API only)
+scripts/         # setup helper
 sandbox/         # Dockerfile for the no-network Python sandbox
 examples/        # sample data (copy into workspace/ to try the analytics agent)
 tests/           # pytest; LLMs are faked, Docker tests skip if the sandbox image is missing
@@ -78,11 +80,31 @@ docs/            # project brief
 ```bash
 make test    # pytest
 make lint    # ruff check + format check
-make dev     # API with auto-reload on :8000
+make dev     # API with auto-reload on :8000 (host; uses your Docker for the sandbox)
+make ui      # Streamlit UI on :8501, talking to the API on :8000
 ```
 
 `GET /health` returns `ok` when Ollama is reachable and every configured model is pulled,
 otherwise `degraded` with the reason (the API itself is still up, so it returns 200).
+
+## API
+
+| Endpoint | |
+|---|---|
+| `POST /runs {goal}` | start a run in the background -> `{thread_id}` |
+| `GET /runs/{id}/events?after=n` | SSE: `triage`, `plan`, `step`, `token` (writer, live), `final`, `error`, `done`; replays from event `n` |
+| `GET /runs/{id}` | state from the checkpointer (works after an API restart) |
+| `POST /runs/{id}/resume` | continue a run that stopped part-way |
+| `GET/POST /files`, `GET /files/{path}` | list, upload, download workspace files (path-checked) |
+| `GET /health` | Ollama reachable + models pulled |
+
+Runs don't live inside the HTTP request: they take minutes on a laptop, and Streamlit re-runs
+its script on every interaction. The UI follows a run's event stream and reconnects from the
+last event it saw.
+
+In Docker, the API starts sandbox containers through the host's Docker socket (`make setup`
+writes the workspace's host path to `.env` as `HOST_WORKSPACE`). That gives the API container
+control of Docker: fine for a local single-user app, not for anything shared.
 
 ## Tools and sandboxing
 
@@ -122,6 +144,6 @@ These came from running real goals on `qwen2.5:7b` / `qwen2.5:3b` on an 8 GB lap
   it even with the error message. Fix: the sandbox pins pandas 2.x.
 - **The writer invented results for a failed step**, despite being told not to. Fix: failed
   steps are described plainly, and the failure notice above is added by code.
-- **Speed:** the 7B model generated ~2–5 tokens/s (CPU/GPU split); a smaller context window
+- **Speed:** the 7B model generated ~2â€“5 tokens/s (CPU/GPU split); a smaller context window
   (6144 instead of 8192) was noticeably faster. A CSV analysis + report took ~2 min; a goal with
   web research + analysis + report took ~14 min. Phase 10 measures this properly.

@@ -48,3 +48,8 @@ def test_unwraps_answer_fenced_as_markdown():
 def test_keeps_answers_that_only_contain_code_blocks():
     answer = "Run this:\n```python\nprint(1)\n```"
     assert strip_outer_fence(answer) == answer
+
+
+def test_unwraps_markdown_fence_followed_by_text():
+    answer = "```markdown\n## Units\n\n| a | b |\n```\n\nSources: [1] sales.csv"
+    assert strip_outer_fence(answer) == "## Units\n\n| a | b |\n\nSources: [1] sales.csv"
