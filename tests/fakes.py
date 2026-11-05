@@ -14,7 +14,7 @@ class FakeChat:
         self.respond = respond
         self.calls: list[list[BaseMessage]] = []
 
-    def invoke(self, input: list[BaseMessage]) -> AIMessage:
+    async def ainvoke(self, input: list[BaseMessage]) -> AIMessage:
         self.calls.append(input)
         return AIMessage(self.respond(input))
 

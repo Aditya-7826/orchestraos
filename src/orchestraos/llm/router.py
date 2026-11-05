@@ -7,7 +7,7 @@ Policy (from the brief):
     then make one attempt on the other model. If that fails too, raise.
 
 The router only depends on the tiny `ChatModel` protocol below (anything with
-`.invoke(messages)`), so tests use scripted fakes and never need Ollama.
+`.ainvoke(messages)`), so tests use scripted fakes and never need Ollama.
 """
 
 import json
@@ -36,7 +36,7 @@ SMALL_MODEL_TASKS = frozenset({TaskKind.ROUTE, TaskKind.CLASSIFY})
 
 
 class ChatModel(Protocol):
-    def invoke(self, input: list[BaseMessage]) -> BaseMessage: ...
+    async def ainvoke(self, input: list[BaseMessage]) -> BaseMessage: ...
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ class RouterResult:
     text: str
     model: str  # which model produced the answer
     attempts: list[Attempt] = field(default_factory=list)
-    parsed: BaseModel | None = None  # set by invoke_json
+    parsed: BaseModel | None = None  # set by ainvoke_json
 
     @property
     def used_fallback(self) -> bool:
@@ -126,16 +126,16 @@ class ModelRouter:
             return self.small, self.large
         return self.large, self.small
 
-    def invoke(self, kind: TaskKind, messages: list[BaseMessage]) -> RouterResult:
-        return self._run(kind, messages, schema=None)
+    async def ainvoke(self, kind: TaskKind, messages: list[BaseMessage]) -> RouterResult:
+        return await self._run(kind, messages, schema=None)
 
-    def invoke_json(
+    async def ainvoke_json(
         self, kind: TaskKind, messages: list[BaseMessage], schema: type[BaseModel]
     ) -> RouterResult:
-        """Like `invoke`, but the answer must parse into `schema` (else it counts as a failure)."""
-        return self._run(kind, messages, schema=schema)
+        """Like `ainvoke`, but the answer must parse into `schema` (else it counts as a failure)."""
+        return await self._run(kind, messages, schema=schema)
 
-    def _run(
+    async def _run(
         self, kind: TaskKind, messages: list[BaseMessage], schema: type[BaseModel] | None
     ) -> RouterResult:
         primary, fallback = self.order_for(kind)
@@ -145,7 +145,7 @@ class ModelRouter:
 
         for candidate in plan:
             try:
-                text = message_text(candidate.model.invoke(messages))
+                text = message_text(await candidate.model.ainvoke(messages))
                 parsed = parse_json_output(text, schema) if schema else None
             except Exception as exc:  # any model/transport/parse failure triggers the policy
                 logger.warning("%s task failed on %s: %s", kind, candidate.name, exc)

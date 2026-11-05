@@ -8,12 +8,13 @@ so a new goal always gets a new thread.
 """
 
 import argparse
+import asyncio
 import logging
 import sys
 import uuid
 
 from orchestraos.config import get_settings
-from orchestraos.graph.factory import build_app
+from orchestraos.graph.factory import open_app
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,23 +31,30 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("give either a goal (new run) or --thread (resume), not both")
 
     thread_id = args.thread or uuid.uuid4().hex[:8]
+    try:
+        return asyncio.run(run_goal(args.goal, thread_id, resume=bool(args.thread)))
+    except ValueError as exc:
+        parser.error(str(exc))
+
+
+async def run_goal(goal: str | None, thread_id: str, *, resume: bool) -> int:
     config = {"configurable": {"thread_id": thread_id}}
-    app = build_app(get_settings())
+    async with open_app(get_settings()) as app:
+        if resume:
+            snapshot = await app.aget_state(config)
+            if not snapshot.values:
+                raise ValueError(f"no run found for thread {thread_id}")
+            if not snapshot.next:
+                raise ValueError(f"thread {thread_id} already finished")
 
-    if args.thread:
-        snapshot = app.get_state(config)
-        if not snapshot.values:
-            parser.error(f"no run found for thread {thread_id}")
-        if not snapshot.next:
-            parser.error(f"thread {thread_id} already finished")
+        # A goal starts a new run; None means "continue from the last checkpoint".
+        graph_input = None if resume else {"goal": goal}
+        async for update in app.astream(graph_input, config, stream_mode="updates"):
+            for node in update:
+                print(f"  - {node}", file=sys.stderr)
 
-    # A goal starts a new run; None means "continue from the last checkpoint".
-    graph_input = {"goal": args.goal} if args.goal else None
-    for update in app.stream(graph_input, config, stream_mode="updates"):
-        for node in update:
-            print(f"  - {node}", file=sys.stderr)
+        state = (await app.aget_state(config)).values
 
-    state = app.get_state(config).values
     print(f"\n{state.get('final_answer', '(no answer)')}\n")
     if sources := state.get("sources"):
         print("Sources:\n" + "\n".join(f"  - {s}" for s in sources))

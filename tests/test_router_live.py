@@ -31,7 +31,7 @@ def router() -> ModelRouter:
     return ModelRouter.from_settings(settings)
 
 
-def test_small_model_returns_routing_json(router):
+async def test_small_model_returns_routing_json(router):
     messages = [
         SystemMessage(
             "Pick the agent for the task. Agents: research, writing, analytics. "
@@ -39,10 +39,12 @@ def test_small_model_returns_routing_json(router):
         ),
         HumanMessage("Find recent articles comparing LangGraph and CrewAI."),
     ]
-    result = router.invoke_json(TaskKind.ROUTE, messages, Route)
+    result = await router.ainvoke_json(TaskKind.ROUTE, messages, Route)
     assert result.parsed.agent in {"research", "writing", "analytics"}
 
 
-def test_large_model_writes(router):
-    result = router.invoke(TaskKind.WRITE, [HumanMessage("Say hello in five words or fewer.")])
+async def test_large_model_writes(router):
+    result = await router.ainvoke(
+        TaskKind.WRITE, [HumanMessage("Say hello in five words or fewer.")]
+    )
     assert result.text.strip()

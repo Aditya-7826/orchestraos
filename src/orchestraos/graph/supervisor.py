@@ -59,27 +59,29 @@ def build_supervisor(
     if missing:
         raise ValueError(f"no agent registered for: {sorted(missing)}")
 
-    def recall_memory(state: SupervisorState) -> SupervisorState:
+    async def recall_memory(state: SupervisorState) -> SupervisorState:
         return {
-            "memory_context": memory.recall(state["goal"]),
+            "memory_context": await memory.recall(state["goal"]),
             "messages": [HumanMessage(state["goal"])],
             "current_step": 0,
         }
 
-    def triage(state: SupervisorState) -> SupervisorState:
-        return {"mode": planner.triage(router, state["goal"], state.get("memory_context", ""))}
+    async def triage(state: SupervisorState) -> SupervisorState:
+        return {
+            "mode": await planner.triage(router, state["goal"], state.get("memory_context", ""))
+        }
 
-    def plan(state: SupervisorState) -> SupervisorState:
+    async def plan(state: SupervisorState) -> SupervisorState:
         goal, memory_context = state["goal"], state.get("memory_context", "")
         if state["mode"] == "direct":
             steps = planner.direct_plan(goal)
         else:
-            steps = planner.make_plan(router, goal, memory_context)
+            steps = await planner.make_plan(router, goal, memory_context)
         logger.info("plan: %s", [(s["agent"], s["instruction"]) for s in steps])
         return {"plan": steps}
 
     def make_agent_node(name: str, agent: Agent):
-        def run_agent(state: SupervisorState) -> SupervisorState:
+        async def run_agent(state: SupervisorState) -> SupervisorState:
             step = state["plan"][state["current_step"]]
             task: AgentState = {
                 "goal": state["goal"],
@@ -88,7 +90,7 @@ def build_supervisor(
                 "memory": state.get("memory_context", ""),
             }
             try:
-                out = agent.invoke(task)
+                out = await agent.ainvoke(task)
                 result = StepResult(
                     step_id=step["id"],
                     agent=name,
@@ -120,8 +122,8 @@ def build_supervisor(
         sources = list(dict.fromkeys(s for r in results for s in r["sources"]))
         return {"final_answer": answer, "sources": sources, "messages": [AIMessage(answer)]}
 
-    def store_memory(state: SupervisorState) -> SupervisorState:
-        memory.remember(state["goal"], state["final_answer"])
+    async def store_memory(state: SupervisorState) -> SupervisorState:
+        await memory.remember(state["goal"], state["final_answer"])
         return {}
 
     graph = StateGraph(SupervisorState)

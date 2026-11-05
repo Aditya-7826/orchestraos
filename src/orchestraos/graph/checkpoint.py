@@ -1,15 +1,18 @@
 """SQLite checkpointer: saves supervisor state after every node so runs survive restarts."""
 
-import sqlite3
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from langgraph.checkpoint.sqlite import SqliteSaver
+import aiosqlite
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 
-def open_checkpointer(db_path: Path) -> SqliteSaver:
+@asynccontextmanager
+async def open_checkpointer(db_path: Path) -> AsyncIterator[AsyncSqliteSaver]:
+    """Open (and create if needed) the checkpoint database; closes the connection on exit."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    # check_same_thread=False: FastAPI may run graph steps on different worker threads.
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    saver = SqliteSaver(conn)
-    saver.setup()
-    return saver
+    async with aiosqlite.connect(db_path) as conn:
+        saver = AsyncSqliteSaver(conn)
+        await saver.setup()
+        yield saver

@@ -31,8 +31,8 @@ def stub_agents(**overrides):
     return agents
 
 
-def run(app, goal: str, thread: str = "t1") -> dict:
-    return app.invoke({"goal": goal}, {"configurable": {"thread_id": thread}})
+async def run(app, goal: str, thread: str = "t1") -> dict:
+    return await app.ainvoke({"goal": goal}, {"configurable": {"thread_id": thread}})
 
 
 class RecordingMemory(NullMemory):
@@ -40,24 +40,24 @@ class RecordingMemory(NullMemory):
         self.recalled = recalled
         self.stored: list[tuple[str, str]] = []
 
-    def recall(self, goal: str) -> str:
+    async def recall(self, goal: str) -> str:
         return self.recalled
 
-    def remember(self, goal: str, answer: str) -> None:
+    async def remember(self, goal: str, answer: str) -> None:
         self.stored.append((goal, answer))
 
 
 # --- end-to-end flows -------------------------------------------------------
 
 
-def test_direct_goal_goes_straight_to_writing():
+async def test_direct_goal_goes_straight_to_writing():
     app = build_supervisor(fake_router(responder(mode="direct")), stub_agents(), NullMemory())
-    state = app.invoke({"goal": "What is LangGraph?"})
+    state = await app.ainvoke({"goal": "What is LangGraph?"})
     assert [s["agent"] for s in state["plan"]] == ["writing"]
     assert state["final_answer"] == "[writing stub] What is LangGraph?"
 
 
-def test_planned_goal_runs_each_step_in_order_and_collects_sources():
+async def test_planned_goal_runs_each_step_in_order_and_collects_sources():
     def research(task: AgentState) -> AgentState:
         return {"output": "found", "sources": ["https://a.example", "https://b.example"]}
 
@@ -76,13 +76,13 @@ def test_planned_goal_runs_each_step_in_order_and_collects_sources():
     )
     app = build_supervisor(fake_router(responder(plan=plan)), agents, NullMemory())
 
-    state = app.invoke({"goal": "compare things"})
+    state = await app.ainvoke({"goal": "compare things"})
     assert [r["agent"] for r in state["results"]] == ["research", "analytics", "writing"]
     assert state["final_answer"] == "the report"
     assert state["sources"] == ["https://a.example", "https://b.example"]
 
 
-def test_failing_agent_is_recorded_and_run_continues():
+async def test_failing_agent_is_recorded_and_run_continues():
     def broken(task: AgentState) -> AgentState:
         raise RuntimeError("search is down")
 
@@ -90,33 +90,33 @@ def test_failing_agent_is_recorded_and_run_continues():
     agents = stub_agents(research=build_function_agent("research", broken))
     app = build_supervisor(fake_router(responder(plan=plan)), agents, NullMemory())
 
-    state = app.invoke({"goal": "g"})
+    state = await app.ainvoke({"goal": "g"})
     research_result = state["results"][0]
     assert not research_result["ok"] and "search is down" in research_result["output"]
     assert state["final_answer"] == "[writing stub] y"
 
 
-def test_unparseable_plan_falls_back_to_single_writing_step():
+async def test_unparseable_plan_falls_back_to_single_writing_step():
     app = build_supervisor(
         fake_router(responder(raw_plan="I cannot plan this")), stub_agents(), NullMemory()
     )
-    state = app.invoke({"goal": "do the thing"})
+    state = await app.ainvoke({"goal": "do the thing"})
     assert [s["agent"] for s in state["plan"]] == ["writing"]
 
 
-def test_unparseable_triage_defaults_to_planning():
+async def test_unparseable_triage_defaults_to_planning():
     def respond(messages) -> str:
         if "decide how to handle" in system_prompt(messages):
             return "uhh"
         return json.dumps({"steps": [{"agent": "research", "instruction": "r"}]})
 
     app = build_supervisor(fake_router(respond), stub_agents(), NullMemory())
-    state = app.invoke({"goal": "g"})
+    state = await app.ainvoke({"goal": "g"})
     assert state["mode"] == "plan"
     assert [s["agent"] for s in state["plan"]] == ["research", "writing"]
 
 
-def test_memory_is_recalled_before_planning_and_stored_after():
+async def test_memory_is_recalled_before_planning_and_stored_after():
     memory = RecordingMemory(recalled="user prefers short answers")
     seen_prompts: list[str] = []
 
@@ -125,7 +125,7 @@ def test_memory_is_recalled_before_planning_and_stored_after():
         return json.dumps({"mode": "direct"})
 
     app = build_supervisor(fake_router(respond), stub_agents(), memory)
-    state = app.invoke({"goal": "hello"})
+    state = await app.ainvoke({"goal": "hello"})
     assert "user prefers short answers" in seen_prompts[0]
     assert memory.stored == [("hello", state["final_answer"])]
 
@@ -144,7 +144,7 @@ class SimulatedCrash(BaseException):
     """Stands in for the process being killed (not an Exception, so agents can't catch it)."""
 
 
-def test_run_resumes_from_checkpoint_after_restart(tmp_path):
+async def test_run_resumes_from_checkpoint_after_restart(tmp_path):
     db = tmp_path / "checkpoints.sqlite"
     calls = {"research": 0, "analytics": 0}
 
@@ -167,30 +167,32 @@ def test_run_resumes_from_checkpoint_after_restart(tmp_path):
         research=build_function_agent("research", research),
         analytics=build_function_agent("analytics", analytics),
     )
+    router = fake_router(responder(plan=plan))
 
-    def new_app():  # a fresh process: new connection, new compiled graph
-        return build_supervisor(
-            fake_router(responder(plan=plan)), agents, NullMemory(), open_checkpointer(db)
-        )
+    # First "process": crashes during the analytics step.
+    async with open_checkpointer(db) as checkpointer:
+        app = build_supervisor(router, agents, NullMemory(), checkpointer)
+        with pytest.raises(SimulatedCrash):
+            await run(app, "goal", thread="resume-me")
 
-    with pytest.raises(SimulatedCrash):
-        run(new_app(), "goal", thread="resume-me")
+    # Second "process": new connection, new compiled graph, same thread id.
+    async with open_checkpointer(db) as checkpointer:
+        app = build_supervisor(router, agents, NullMemory(), checkpointer)
+        state = await app.ainvoke(None, {"configurable": {"thread_id": "resume-me"}})
 
-    state = new_app().invoke(None, {"configurable": {"thread_id": "resume-me"}})
     assert [r["agent"] for r in state["results"]] == ["research", "analytics", "writing"]
     assert calls == {"research": 1, "analytics": 2}  # research was not re-run
 
 
-def test_threads_are_isolated(tmp_path):
-    app = build_supervisor(
-        fake_router(responder(mode="direct")),
-        stub_agents(),
-        NullMemory(),
-        open_checkpointer(tmp_path / "c.sqlite"),
-    )
-    run(app, "first", thread="a")
-    run(app, "second", thread="b")
-    assert app.get_state({"configurable": {"thread_id": "a"}}).values["goal"] == "first"
+async def test_threads_are_isolated(tmp_path):
+    async with open_checkpointer(tmp_path / "c.sqlite") as checkpointer:
+        app = build_supervisor(
+            fake_router(responder(mode="direct")), stub_agents(), NullMemory(), checkpointer
+        )
+        await run(app, "first", thread="a")
+        await run(app, "second", thread="b")
+        snapshot = await app.aget_state({"configurable": {"thread_id": "a"}})
+    assert snapshot.values["goal"] == "first"
 
 
 # --- helpers ----------------------------------------------------------------

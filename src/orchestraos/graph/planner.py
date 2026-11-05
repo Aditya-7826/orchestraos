@@ -34,10 +34,12 @@ class Plan(BaseModel):
     steps: list[PlanStep] = Field(min_length=1)
 
 
-def triage(router: ModelRouter, goal: str, memory_context: str = "") -> Literal["direct", "plan"]:
+async def triage(
+    router: ModelRouter, goal: str, memory_context: str = ""
+) -> Literal["direct", "plan"]:
     messages = [SystemMessage(TRIAGE_SYSTEM), HumanMessage(with_memory(goal, memory_context))]
     try:
-        result = router.invoke_json(TaskKind.CLASSIFY, messages, Triage)
+        result = await router.ainvoke_json(TaskKind.CLASSIFY, messages, Triage)
     except ModelRouterError:
         logger.warning("triage failed; defaulting to 'plan'")
         return "plan"
@@ -48,13 +50,13 @@ def direct_plan(goal: str) -> list[Step]:
     return [Step(id=1, agent="writing", instruction=goal)]
 
 
-def make_plan(router: ModelRouter, goal: str, memory_context: str = "") -> list[Step]:
+async def make_plan(router: ModelRouter, goal: str, memory_context: str = "") -> list[Step]:
     messages = [
         SystemMessage(PLANNER_SYSTEM.format(max_steps=MAX_STEPS)),
         HumanMessage(with_memory(goal, memory_context)),
     ]
     try:
-        result = router.invoke_json(TaskKind.PLAN, messages, Plan)
+        result = await router.ainvoke_json(TaskKind.PLAN, messages, Plan)
     except ModelRouterError:
         logger.warning("planning failed; falling back to a single writing step")
         return direct_plan(goal)
