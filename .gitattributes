@@ -1,0 +1,4 @@
+# Keep LF in the repo and working tree so scripts copied into Linux containers work.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

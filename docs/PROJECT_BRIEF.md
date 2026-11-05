@@ -29,7 +29,40 @@ A user gives a goal in a chat UI (e.g. "Research LangGraph vs CrewAI, analyse th
 - **Evals:** a fixed benchmark of 30+ tasks with pass/fail checks, so all metrics in the README are measured, not invented.
 
 ## Repo structure (target)
-_TODO — missing from the brief._
+_Not in the original brief; derived from the architecture above._
+
+```
+src/orchestraos/
+  config.py            # settings from .env
+  ollama.py            # Ollama REST helpers
+  doctor.py            # setup checks
+  llm/router.py        # model router: small vs large, retry + fallback
+  graph/               # supervisor StateGraph, typed state, SQLite checkpointer
+  agents/              # memory, research, writing, analytics, action subgraphs
+  mcp_servers/         # FastMCP servers: search, filesystem, python_sandbox
+  memory/              # ChromaDB vector store, Neo4j graph store
+  a2a/                 # research agent as a standalone A2A service
+  api/                 # FastAPI backend (SSE streaming)
+  observability.py     # Langfuse tracing
+ui/app.py              # Streamlit chat
+sandbox/Dockerfile     # no-network image the analytics code runs in
+evals/                 # 30+ benchmark tasks + runner
+tests/
+```
 
 ## Phases
-_TODO — missing from the brief._
+_Not in the original brief; derived from the architecture above._
+
+| # | Phase | Done when |
+|---|---|---|
+| 0 | Foundation: config, health, doctor, Compose profiles | ✅ |
+| 1 | Model router: small/large per step, retry once, fall back | ✅ |
+| 2 | Supervisor: typed state, planner, routing to stub agents, SQLite checkpointer | a run resumes after a restart |
+| 3 | MCP tool servers: search, filesystem (workspace-only), python sandbox | each server testable on its own |
+| 4 | Research, writing and analytics agents | end-to-end report with sources and a chart |
+| 5 | FastAPI SSE + Streamlit chat UI | goal in, streamed steps and answer out |
+| 6 | Action agent + human approval via `interrupt` | approve/reject in the UI |
+| 7 | Memory: ChromaDB + Neo4j (`graph` profile) | facts recalled in a new session |
+| 8 | Research agent over A2A (`RESEARCH_MODE=a2a`) | Agent Card served, supervisor calls it |
+| 9 | Langfuse tracing (`observability` profile) | every agent step traced |
+| 10 | Evals: 30+ tasks with pass/fail checks | README metrics come from a real run |

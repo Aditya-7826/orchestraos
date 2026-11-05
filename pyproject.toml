@@ -9,6 +9,8 @@ dependencies = [
     "uvicorn>=0.32",
     "httpx>=0.28",
     "psutil>=6.0",
+    "langchain-ollama>=1.1.0",
+    "langchain-core>=1.7.6",
 ]
 
 [project.scripts]
@@ -26,7 +28,8 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra -m 'not live'"
+markers = ["live: needs a running Ollama with the configured models (uv run pytest -m live)"]
 
 [tool.ruff]
 line-length = 100
