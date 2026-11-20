@@ -24,3 +24,4 @@ chroma/
 .idea/
 .DS_Store
 Thumbs.db
+.playwright-mcp/
