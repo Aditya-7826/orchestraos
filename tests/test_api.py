@@ -175,3 +175,14 @@ def test_only_writing_agent_tokens_are_streamed():
 
 def test_inner_subgraph_updates_are_dropped():
     assert to_events(("analytics:abc",), "updates", {"run_code": {"run": {}}}) == []
+
+
+def test_agent_progress_becomes_an_activity_event():
+    chunk = {"type": "activity", "text": "Running the code"}
+    assert to_events(("analytics:abc",), "custom", chunk) == [
+        {"type": "activity", "agent": "analytics", "text": "Running the code"}
+    ]
+    assert to_events(("analytics:abc", "inner:def"), "custom", chunk)[0]["agent"] == "analytics"
+    assert to_events(("tools:abc",), "custom", chunk) == []
+    assert to_events((), "custom", chunk) == []
+    assert to_events(("analytics:abc",), "custom", {"type": "other"}) == []

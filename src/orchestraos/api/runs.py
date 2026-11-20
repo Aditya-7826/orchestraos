@@ -92,7 +92,7 @@ class RunManager:
         config = self.config(run.thread_id)
         try:
             async for namespace, mode, chunk in self.graph.astream(
-                graph_input, config, stream_mode=["updates", "messages"], subgraphs=True
+                graph_input, config, stream_mode=["updates", "messages", "custom"], subgraphs=True
             ):
                 for event in to_events(namespace, mode, chunk):
                     await run.emit(event)

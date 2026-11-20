@@ -1,9 +1,11 @@
 """Turns LangGraph stream items into the small JSON events the UI understands.
 
-The graph is streamed with stream_mode=["updates", "messages"] and subgraphs=True,
+The graph is streamed with stream_mode=["updates", "messages", "custom"] and subgraphs=True,
 which yields (namespace, mode, chunk) tuples:
   * ((), "updates", {node: update})           a supervisor node finished
   * (("writing:<id>",), "messages", (msg, meta)) a token from the writing agent's LLM
+  * (("analytics:<id>",), "custom", {"type": "activity", "text": ...}) an agent's
+    status line, sent with report_progress()
 Everything else (inner subgraph updates, tokens from other agents) is dropped.
 """
 
@@ -21,7 +23,16 @@ def to_events(namespace: tuple[str, ...], mode: str, chunk: Any) -> list[Event]:
         return token_events(namespace, chunk)
     if mode == "updates" and not namespace:
         return [event for node, update in chunk.items() for event in update_events(node, update)]
+    if mode == "custom" and namespace and isinstance(chunk, dict):
+        return activity_events(namespace[0].split(":", 1)[0], chunk)
     return []
+
+
+def activity_events(agent: str, chunk: dict[str, Any]) -> list[Event]:
+    """An agent's one-line "what I'm doing now", sent with report_progress()."""
+    if agent not in AGENT_NAMES or chunk.get("type") != "activity":
+        return []
+    return [{"type": "activity", "agent": agent, "text": str(chunk.get("text", ""))}]
 
 
 def token_events(namespace: tuple[str, ...], chunk: Any) -> list[Event]:
