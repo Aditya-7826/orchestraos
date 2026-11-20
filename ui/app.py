@@ -14,6 +14,7 @@ import re
 
 import httpx
 import streamlit as st
+from agent_status import agent_board, board_html
 from httpx_sse import connect_sse
 from theme import CUSTOM, DEFAULT_THEME, THEMES, css, custom_theme, swatches
 
@@ -126,7 +127,12 @@ def render_turn(turn: dict) -> None:
 # --- following a live run ---------------------------------------------------
 
 
-def follow(active: dict) -> None:
+def show_agents(bar, events: list[dict], finished: bool = False) -> None:
+    """Redraw the agent bar: one card per agent and a line saying what's happening."""
+    bar.html(board_html(agent_board(events, finished=finished)))
+
+
+def follow(active: dict, bar) -> None:
     """Stream the active run's events into the page until it ends, then store the turn."""
     with st.chat_message("user"):
         st.markdown(active["goal"])
@@ -151,6 +157,7 @@ def follow(active: dict) -> None:
                         answer_box.markdown(draft + "▌")
                         continue
                     active["events"].append(event)
+                    show_agents(bar, active["events"])
                     if event["type"] == "final":
                         final = event
                     elif event["type"] == "done":
@@ -257,13 +264,22 @@ with st.sidebar:
         state.history = []
         st.rerun()
 
+# The agent bar sits above the conversation: live during a run, the last run's result after.
+bar = st.empty()
+if state.active:
+    show_agents(bar, state.active["events"])
+elif state.history:
+    show_agents(bar, state.history[-1]["events"], finished=True)
+else:
+    show_agents(bar, [])
+
 for turn in state.history:
     render_turn(turn)
 
 if state.active and state.active.get("pending"):
     ask_for_approval(state.active)
 elif state.active:
-    follow(state.active)
+    follow(state.active, bar)
 
 if goal := st.chat_input("What should I do? e.g. “Analyse sales.csv and chart revenue”"):
     thread_id = api("POST", "/runs", json={"goal": goal}).json()["thread_id"]
