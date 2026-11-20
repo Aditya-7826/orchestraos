@@ -14,7 +14,13 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
 from orchestraos.agents.base import Agent, AgentState
-from orchestraos.agents.common import AgentError, extract_code, mentioned_files, task_text
+from orchestraos.agents.common import (
+    AgentError,
+    extract_code,
+    mentioned_files,
+    report_progress,
+    task_text,
+)
 from orchestraos.agents.prompts import CODE_SYSTEM, FIX_CODE_SYSTEM
 from orchestraos.llm.router import ModelRouter, TaskKind
 from orchestraos.tools.client import ToolCaller
@@ -60,12 +66,14 @@ class AnalyticsState(AgentState, total=False):
 
 def build_analytics_agent(router: ModelRouter, tools: ToolCaller) -> Agent:
     async def find_data(state: AnalyticsState) -> AnalyticsState:
+        report_progress("Looking for the data file in the workspace")
         files = await tools.call("list_files")
         data = [f for f in files if f.endswith(DATA_SUFFIXES) and not f.startswith("outputs/")]
         chosen = mentioned_files(data, task_text(state)) or data
         if not chosen:
             raise AgentError("no data files (.csv, .tsv, .json) found in the workspace folder")
         chosen = chosen[:MAX_DATA_FILES]
+        report_progress(f"Profiling {', '.join(chosen)}: columns, types and first rows")
 
         # Profile the files in the sandbox so the model sees real column names and dtypes
         # (guessing types from raw CSV lines led to code that summed date columns).
@@ -82,12 +90,15 @@ def build_analytics_agent(router: ModelRouter, tools: ToolCaller) -> Agent:
         return {"data_files": chosen, "previews": previews, "fixes": 0}
 
     async def write_code(state: AnalyticsState) -> AnalyticsState:
+        report_progress(f"Writing pandas code for {', '.join(state['data_files'])}")
         prompt = f"Task: {state['instruction']}\n\nData files:\n{state['previews']}"
         messages = [SystemMessage(CODE_SYSTEM), HumanMessage(prompt)]
         reply = await router.ainvoke(TaskKind.CODE, messages)
         return {"code": extract_code(reply.text)}
 
     async def run_code(state: AnalyticsState) -> AnalyticsState:
+        attempt = f" (attempt {state['fixes'] + 1})" if state.get("fixes") else ""
+        report_progress(f"Running the code in the no-network Docker sandbox{attempt}")
         result = await tools.call(
             "run_python", code=state["code"], timeout_seconds=RUN_TIMEOUT_SECONDS
         )
@@ -100,6 +111,7 @@ def build_analytics_agent(router: ModelRouter, tools: ToolCaller) -> Agent:
 
     async def fix_code(state: AnalyticsState) -> AnalyticsState:
         error = state["run"]["stderr"][-2000:]  # the traceback's end is the useful part
+        report_progress(f"The code failed ({last_line(error)[:120]}), asking the model to fix it")
         prompt = (
             f"Task: {state['instruction']}\n\nData files:\n{state['previews']}\n\n"
             f"Script:\n```python\n{state['code']}\n```\n\nError:\n{error}"
@@ -115,6 +127,8 @@ def build_analytics_agent(router: ModelRouter, tools: ToolCaller) -> Agent:
 
     def report(state: AnalyticsState) -> AnalyticsState:
         charts = state["run"]["files"]
+        made = f", {len(charts)} chart{'s' if len(charts) != 1 else ''} made" if charts else ""
+        report_progress(f"The code ran{made}; collecting the results")
         output = f"Analysed: {', '.join(state['data_files'])}\n\nResults:\n{state['run']['stdout']}"
         if charts:
             output += "\nCharts:\n" + "\n".join(f"- {path}" for path in charts)
