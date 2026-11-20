@@ -30,11 +30,17 @@ the full suite taking 51 minutes. See [Results](#results).
   agent is also served over A2A (official `a2a-sdk`) with an Agent Card.
 - **Is observable and measured.** Every step can be traced in self-hosted Langfuse, and a
   36-task benchmark with pass/fail checks produces the numbers below.
+- **Shows its work live.** An agent bar in the UI has a card per agent. The card of the agent
+  that's working glows, and a status line says what that agent is doing right now (e.g.
+  *"Reading 3 pages: …"*, *"Running the code in the sandbox (attempt 2)"*).
+- **Looks the part.** A glassy neon theme in red and black, with presets (Cyan, Green, Amber,
+  Violet, Pink, Ice) or any custom accent colour, picked in the sidebar.
 
 ## Architecture
 
 ```
  Streamlit chat UI ──HTTP/SSE──▶ FastAPI (runs as background tasks, event replay)
+ (agent bar, themes)
                                    │
                                    ▼
                     LangGraph supervisor  (SQLite checkpointer)
@@ -286,6 +292,38 @@ The UI shows every proposed write (path, size, overwrite warning, preview), and
 state. To save a long answer, the model doesn't retype it: the action says "save step N's
 output" and code copies it exactly.
 
+### Live agent status
+
+Each agent step announces what it is starting with `report_progress("…")`
+([agents/common.py](src/orchestraos/agents/common.py)). That writes to LangGraph's `custom`
+stream. The API streams the `custom` mode alongside `updates` and `messages`, and turns each
+line into an `activity` event tagged with the agent, taken from the subgraph's namespace
+(`analytics:<id>` → `analytics`). Outside a streamed run (CLI, tests) the call does nothing.
+
+| Agent | Example status lines |
+|---|---|
+| research | "Choosing what to search the web for" → "Searching the web for: …" → "Reading 3 pages: …" → "Writing up the findings from 3 sources" |
+| analytics | "Profiling sales.csv: columns, types and first rows" → "Writing pandas code for sales.csv" → "Running the code in the no-network Docker sandbox" → "The code failed (NameError: …), asking the model to fix it" → "… (attempt 2)" |
+| writing | "Writing the answer" |
+| action | "Working out which files to write" → "Waiting for your approval to write notes/x.md" → "Approved: writing notes/x.md" |
+
+The UI folds a run's events into one card per agent with
+[ui/agent_status.py](ui/agent_status.py), which is pure Python and unit-tested. The current
+step is the first planned step without a `step` result. Its agent is *running*, or *needs you*
+while an approval is pending. Agents with later steps are *queued*, finished ones are *done*
+or *failed*, and agents not in the plan are *idle*. The bar is redrawn on every event and stays
+pinned above the conversation.
+
+### Themes
+
+[ui/theme.py](ui/theme.py) builds the CSS from one accent colour: black glass panels with a
+backdrop blur, neon borders and glow, and a perspective grid floor. Every colour comes from a
+few CSS variables, so a theme is just an accent and a darker partner. The presets are Red
+(default), Cyan, Green, Amber, Violet, Pink and Ice, and **Custom** opens a colour picker. The
+choice is kept in the URL (`?theme=Green`, `?theme=Custom&accent=ff8800`).
+[.streamlit/config.toml](.streamlit/config.toml) sets Streamlit's dark base theme so the
+widgets the CSS doesn't restyle match, and it's copied into the Docker image.
+
 ### Memory
 
 - **Semantic (ChromaDB, `nomic-embed-text`):** past goals and answers, plus facts you stated.
@@ -368,6 +406,11 @@ These are real failures from live runs on an 8 GB laptop, and what fixed them:
   handler swallowed approval pauses. The handler now re-raises `GraphBubbleUp`.
 - **The end of each trace went missing:** the 5 s export timeout aborted the last batch while
   the model saturated the CPU. The export timeout is now 30 s.
+- **A subgraph's private state doesn't reach the parent's stream.** The first version of the
+  status line read the agents' inner `updates`, but with an output schema those arrive as
+  `None` (e.g. `{"propose": None}`), so the search queries and file names were invisible. Agents
+  now report progress explicitly on the `custom` stream, which also lets the line say what is
+  starting rather than what just finished.
 - **Speed:** the 7B model generated about 2–5 tokens/s, split between CPU and GPU. A 6144-token
   context was noticeably faster than 8192.
 
