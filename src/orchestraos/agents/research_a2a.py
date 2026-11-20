@@ -17,7 +17,7 @@ from langgraph.graph import END, START, StateGraph
 
 from orchestraos.a2a.protocol import read_result, task_message
 from orchestraos.agents.base import Agent, AgentState
-from orchestraos.agents.common import AgentError
+from orchestraos.agents.common import AgentError, report_progress
 
 # Research on a laptop can take minutes (model + several page fetches).
 TIMEOUT = httpx.Timeout(10, read=600)
@@ -29,6 +29,7 @@ def build_a2a_research_agent(
     url: str, http_client: HttpClientFactory = lambda: httpx.AsyncClient(timeout=TIMEOUT)
 ) -> Agent:
     async def call_remote(state: AgentState) -> AgentState:
+        report_progress(f"Asking the remote research agent over A2A at {url}")
         request = SendMessageRequest(
             message=task_message(
                 state["instruction"], state.get("goal", ""), state.get("context", "")
