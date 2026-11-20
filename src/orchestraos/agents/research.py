@@ -10,13 +10,14 @@ write findings) and the tool calls themselves are made by code.
 import asyncio
 import logging
 from typing import TypedDict
+from urllib.parse import urlsplit
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
 from orchestraos.agents.base import Agent, AgentState
-from orchestraos.agents.common import mentioned_files, task_text
+from orchestraos.agents.common import mentioned_files, report_progress, task_text
 from orchestraos.agents.prompts import QUERY_SYSTEM, SYNTHESIZE_SYSTEM
 from orchestraos.llm.router import ModelRouter, ModelRouterError, TaskKind
 from orchestraos.tools.client import ToolCaller, ToolCallError
@@ -57,6 +58,11 @@ def interleave(hit_lists: list[list[dict]], limit: int) -> list[dict]:
     return picked[:limit]
 
 
+def site(url: str) -> str:
+    """The host of a URL without "www.", for short status lines."""
+    return urlsplit(url).netloc.removeprefix("www.") or url
+
+
 def numbered_sources(sources: list[Source]) -> str:
     return "\n\n".join(
         f"[{i}] {s['title'] or s['ref']} ({s['ref']})\n{s['text']}"
@@ -66,6 +72,7 @@ def numbered_sources(sources: list[Source]) -> str:
 
 def build_research_agent(router: ModelRouter, tools: ToolCaller) -> Agent:
     async def plan_queries(state: ResearchState) -> ResearchState:
+        report_progress("Choosing what to search the web for")
         messages = [SystemMessage(QUERY_SYSTEM), HumanMessage(state["instruction"])]
         try:
             result = await router.ainvoke_json(TaskKind.PLAN, messages, Queries)
@@ -83,6 +90,9 @@ def build_research_agent(router: ModelRouter, tools: ToolCaller) -> Agent:
                 return []
 
         hits = interleave(await asyncio.gather(*(search(q) for q in queries)), MAX_WEB_PAGES)
+        if hits:
+            sites = ", ".join(site(h["url"]) for h in hits)
+            report_progress(f"Reading {len(hits)} pages: {sites}")
 
         async def read(hit: dict) -> Source:
             try:
@@ -110,6 +120,7 @@ def build_research_agent(router: ModelRouter, tools: ToolCaller) -> Agent:
         return sources
 
     async def gather(state: ResearchState) -> ResearchState:
+        report_progress("Searching the web for: " + "; ".join(state["queries"]))
         local, web = await asyncio.gather(read_local_docs(state), search_web(state["queries"]))
         return {"collected": [*local, *web]}
 
@@ -118,6 +129,7 @@ def build_research_agent(router: ModelRouter, tools: ToolCaller) -> Agent:
         if not sources:
             return {"output": "No sources found for this task.", "sources": [], "artifacts": []}
 
+        report_progress(f"Writing up the findings from {len(sources)} sources")
         prompt = f"Task: {state['instruction']}\n\nSources:\n\n{numbered_sources(sources)}"
         messages = [SystemMessage(SYNTHESIZE_SYSTEM), HumanMessage(prompt)]
         findings = (await router.ainvoke(TaskKind.WRITE, messages)).text.strip()
