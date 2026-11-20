@@ -100,6 +100,8 @@ def render_progress(events: list[dict]) -> None:
             st.markdown(step_line(event))
             if event["preview"]:
                 st.caption(event["preview"][:300] + ("…" if len(event["preview"]) > 300 else ""))
+        elif event["type"] == "activity":
+            st.caption(f"↳ {AGENT_ICONS.get(event['agent'], '')} {event['text']}")
         elif event["type"] == "error":
             st.error(event["message"])
 
