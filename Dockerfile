@@ -17,6 +17,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src ./src
 COPY ui ./ui
+COPY .streamlit ./.streamlit
 RUN uv sync --frozen --no-dev
 
 EXPOSE 8000 8501
