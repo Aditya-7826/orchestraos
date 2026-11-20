@@ -1,0 +1,14 @@
+# Streamlit's base theme. ui/theme.py layers the glassy neon look and the accent
+# colour on top; these keep the widgets it doesn't restyle dark to match.
+[theme]
+base = "dark"
+primaryColor = "#ff2a3d"
+backgroundColor = "#050507"
+secondaryBackgroundColor = "#101018"
+textColor = "#e9e9f0"
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
