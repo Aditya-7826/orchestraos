@@ -15,6 +15,7 @@ import re
 import httpx
 import streamlit as st
 from httpx_sse import connect_sse
+from theme import CUSTOM, DEFAULT_THEME, THEMES, css, custom_theme, swatches
 
 API = os.environ.get("ORCHESTRA_API", "http://localhost:8000")
 IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
@@ -24,6 +25,28 @@ st.set_page_config(page_title="OrchestraOS", page_icon="🎼", layout="centered"
 state = st.session_state
 state.setdefault("history", [])  # finished turns
 state.setdefault("active", None)  # {"thread_id", "goal", "events_seen", "events"} while running
+# The theme lives in the URL too, so a reload or a bookmarked link keeps it.
+if "theme" not in state:
+    wanted = st.query_params.get("theme", DEFAULT_THEME)
+    state.theme = wanted if wanted in THEMES or wanted == CUSTOM else DEFAULT_THEME
+state.setdefault("custom_accent", "#" + st.query_params.get("accent", "ff2a3d").lstrip("#"))
+
+
+def remember_theme() -> None:
+    st.query_params["theme"] = state.theme
+    if state.theme == CUSTOM:
+        st.query_params["accent"] = state.custom_accent.lstrip("#")
+    else:
+        st.query_params.pop("accent", None)
+
+
+def current_theme():
+    if state.theme == CUSTOM:
+        return custom_theme(state.custom_accent)
+    return THEMES[state.theme]
+
+
+st.html(css(current_theme()))
 
 
 # --- API helpers ------------------------------------------------------------
@@ -199,6 +222,13 @@ def ask_for_approval(active: dict) -> None:
 with st.sidebar:
     st.title("🎼 OrchestraOS")
     st.caption("Local multi-agent assistant. Everything runs on your machine.")
+
+    # Keyed widgets: Streamlit updates state.theme before the rerun, so the CSS at the top
+    # of the script already uses the new colour.
+    st.selectbox("Theme", [*THEMES, CUSTOM], key="theme", on_change=remember_theme)
+    if state.theme == CUSTOM:
+        st.color_picker("Accent colour", key="custom_accent", on_change=remember_theme)
+    st.html(swatches(current_theme()))
     try:
         health = api("GET", "/health").json()
         if health["status"] == "ok":
