@@ -22,6 +22,8 @@ def make_client(tmp_path):
 def start_and_wait_for_approval(client) -> tuple[str, list[dict]]:
     thread_id = client.post("/runs", json={"goal": "report and save it"}).json()["thread_id"]
     events = read_events(client, thread_id)
+    activity = [e["text"] for e in events if e["type"] == "activity"]
+    assert activity[-1] == "Waiting for your approval to write reports/r.md"
     assert events[-2]["type"] == "interrupt"
     assert events[-1] == {"type": "done", "status": "interrupted"}
     return thread_id, events
@@ -39,6 +41,10 @@ def test_approve_resumes_and_writes(tmp_path):
         response = client.post(f"/runs/{thread_id}/approval", json={"approved": True})
         assert response.status_code == 202
         rest = read_events(client, thread_id, after=len(events))
+        assert [e["text"] for e in rest if e["type"] == "activity"][-1] == (
+            "Approved: writing reports/r.md"
+        )
+        rest = [e for e in rest if e["type"] != "activity"]
         assert [e["type"] for e in rest] == ["step", "final", "done"]
         assert rest[-1]["status"] == "completed"
         assert "Saved to reports/r.md" in rest[1]["answer"]
@@ -51,7 +57,8 @@ def test_reject_finishes_without_writing(tmp_path):
         thread_id, events = start_and_wait_for_approval(client)
         client.post(f"/runs/{thread_id}/approval", json={"approved": False, "note": "no"})
         rest = read_events(client, thread_id, after=len(events))
-        assert "Not saved" in rest[1]["answer"] and written == {}
+        final = next(e for e in rest if e["type"] == "final")
+        assert "Not saved" in final["answer"] and written == {}
 
 
 def test_approval_without_pending_request_is_409(tmp_path):

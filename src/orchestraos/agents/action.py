@@ -19,7 +19,7 @@ from langgraph.types import interrupt
 from pydantic import BaseModel, Field, model_validator
 
 from orchestraos.agents.base import Agent, AgentState
-from orchestraos.agents.common import AgentError
+from orchestraos.agents.common import AgentError, report_progress
 from orchestraos.agents.prompts import ACTION_SYSTEM
 from orchestraos.graph.answer import drop_save_instructions, strip_outer_fence
 from orchestraos.llm.router import ModelRouter, ModelRouterError, TaskKind
@@ -105,8 +105,13 @@ def approval_request(writes: list[dict]) -> dict:
     }
 
 
+def write_paths(state: ActionState) -> str:
+    return ", ".join(w["path"] for w in state["writes"])
+
+
 def build_action_agent(router: ModelRouter, tools: ToolCaller) -> Agent:
     async def propose(state: ActionState) -> ActionState:
+        report_progress("Working out which files to write")
         # Only a short label per step: showing more invites the model to retype it.
         steps = "\n".join(
             f"- step {r['step_id']}: {r['agent']} output"
@@ -124,6 +129,8 @@ def build_action_agent(router: ModelRouter, tools: ToolCaller) -> Agent:
 
     def approve(state: ActionState) -> ActionState:
         # Pauses the whole run here until the API resumes it with the user's decision.
+        # (Runs again on resume, so the UI's status line is right after a reconnect too.)
+        report_progress(f"Waiting for your approval to write {write_paths(state)}")
         decision = interrupt(approval_request(state["writes"]))
         return {"decision": {"approved": bool(decision.get("approved")),
                              "note": str(decision.get("note", ""))}}  # fmt: skip
@@ -138,6 +145,7 @@ def build_action_agent(router: ModelRouter, tools: ToolCaller) -> Agent:
                 "output": f"Not saved: you declined writing {', '.join(paths)}{note}.",
                 "sources": [], "artifacts": [], "approval": approval,
             }  # fmt: skip
+        report_progress(f"Approved: writing {', '.join(paths)}")
         written = [
             await tools.call("write_file", path=w["path"], content=w["content"])
             for w in state["writes"]
