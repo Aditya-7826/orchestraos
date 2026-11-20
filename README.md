@@ -193,8 +193,12 @@ new session:
    `workspace/`. `sales.csv` and `employees.csv` are there already.
 4. Type a goal in the chat box, for example *"Analyse employees.csv: average salary per
    department, with a chart"*.
-5. Watch it work. The status box shows the plan and each finished step, and the answer streams
-   in as the writer produces it. Charts appear inline.
+5. Watch it work. The agent bar at the top has one card per agent (research, analytics,
+   writing, action). The card of the agent that's working glows, the others show *queued*,
+   *done* or *idle*, and the line under the cards says what that agent is doing right now,
+   e.g. *"Running the code in the no-network Docker sandbox (attempt 2)"*. The status box
+   keeps the plan and the full trail, and the answer streams in as the writer produces it.
+   Charts appear inline.
 6. Approve or reject. If the goal asks to save something (*"... and save it to
    reports/salaries.md"*), the run stops and shows each proposed file with a preview. Click
    **Approve** or **Reject**, adding a note if you like.
@@ -202,6 +206,10 @@ new session:
    **How I did it** to see the plan and each step's result.
 8. Come back later. Tell it a preference once (*"I prefer short bullet points"*) and later
    answers follow it.
+9. Pick a theme. The UI is a glassy neon "grid" look in red and black by default. Switch
+   it to Cyan, Green, Amber, Violet, Pink or Ice under **Theme** in the sidebar, or choose
+   **Custom** and pick any accent colour. The choice is kept in the URL (`?theme=Cyan`), so a
+   bookmark or a reload keeps it.
 
 ### 3. Use it from the terminal or the API
 
@@ -333,7 +341,7 @@ approval stays together.
 | Endpoint | |
 |---|---|
 | `POST /runs {goal}` | start a run in the background → `{thread_id}` |
-| `GET /runs/{id}/events?after=n` | SSE events: `triage`, `plan`, `step`, `token`, `interrupt`, `final`, `error`, `done`; replays from event `n` |
+| `GET /runs/{id}/events?after=n` | SSE events: `triage`, `plan`, `activity` (an agent's one-line status), `step`, `token`, `interrupt`, `final`, `error`, `done`; replays from event `n` |
 | `GET /runs/{id}` | run state from the checkpointer (works after an API restart) |
 | `POST /runs/{id}/resume` | continue a run that stopped part-way |
 | `POST /runs/{id}/approval {approved, note}` | answer a pending approval |
@@ -401,6 +409,8 @@ src/orchestraos/
   api/             FastAPI: background runs, SSE, files
   observability.py Langfuse tracing (opt-in)
 ui/app.py          Streamlit chat UI
+ui/agent_status.py the agent bar: which agent is working, from the run's events
+ui/theme.py        the glassy neon theme and its colour presets
 evals/             benchmark tasks, checks, runner, results
 sandbox/           Dockerfile for the Python sandbox
 examples/          sample data and notes used by the demo and the benchmark
