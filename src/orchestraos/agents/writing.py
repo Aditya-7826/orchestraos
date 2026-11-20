@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
 from orchestraos.agents.base import Agent, AgentState
+from orchestraos.agents.common import report_progress
 from orchestraos.agents.prompts import WRITING_SYSTEM
 from orchestraos.llm.router import ModelRouter, TaskKind
 
@@ -21,6 +22,7 @@ def writing_prompt(state: AgentState) -> str:
 
 def build_writing_agent(router: ModelRouter) -> Agent:
     async def draft(state: AgentState) -> AgentState:
+        report_progress("Writing the answer")
         messages = [SystemMessage(WRITING_SYSTEM), HumanMessage(writing_prompt(state))]
         reply = await router.ainvoke(TaskKind.WRITE, messages)
         return {"output": reply.text.strip(), "sources": [], "artifacts": []}
